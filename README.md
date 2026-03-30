@@ -23,11 +23,9 @@
 - OS : Windows 11 x64
 - 램 : 16.0 GB
 - 그래픽 카드 0 : Intel(R) UHD Graphics 630
-- 그래픽 카드 1 : NVIDIA GeForce GTX 1660 Ti
-        전용 GPU 메모리	6.0GB
-        공유 GPU 메모리	7.9GB
-        GPU 메모리	13.9GB
+- 그래픽 카드 1 : NVIDIA GeForce GTX 1660 Ti  
+전용 GPU 메모리	6.0GB / 공유 GPU 메모리	7.9GB / GPU 메모리 13.9GB
 
 ### 구현 결과
-이후 추가 - 영상 및 프로파일 레포트
+이후 추가 - 영상 및 프로파일 레포트  
 이 리포트도 ai로 작성할 예정
