@@ -157,5 +157,87 @@ Claude Code와 상호작용할 때는 **텍스트 기반 인터페이스**만 �
 
 ---
 
+## claude_tools 작업 규칙
+
+### 한글 출력 명시
+- 모든 claude_tools 에이전트 프롬프트는 **한글로 작성**
+- Plan, Review, Implementation, Orchestration 결과물도 모두 **한글 마크다운**
+- 사용자 요청이 한글이면 에이전트 출력도 한글로 유지
+
+### UTF-8 인코딩 처리
+- **프롬프트 작성**: 파일 상단에 `# -*- coding: utf-8 -*-` 선언
+- **subprocess 호출**: `encoding='utf-8', errors='replace'` 파라미터 필수
+- **파일 쓰기/읽기**: 항상 `encoding='utf-8'` 명시
+- **Windows 콘솔**: 세션 시작 시 stdout을 UTF-8로 래핑:
+  ```python
+  import io, sys
+  if sys.platform == 'win32' and not isinstance(sys.stdout, io.TextIOWrapper):
+      try:
+          sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+      except:
+          pass  # 이미 래핑되었거나 불가능한 경우
+  ```
+
+### Anthropic API 직접 사용 (권장)
+- **dependency 설치**: `pip install anthropic`
+- **API 키 설정** (다음 중 하나):
+  1. **환경 변수**: `set ANTHROPIC_API_KEY=sk-ant-...` (Windows)
+  2. **Claude Code 웹/데스크톱**: 자동 인식 (설정 필요 없음)
+  3. **.env 파일**: 프로젝트 루트에 `.env` 생성:
+     ```
+     ANTHROPIC_API_KEY=sk-ant-...
+     ```
+- **기본 패턴**:
+  ```python
+  from anthropic import Anthropic
+  
+  client = Anthropic()  # 자동으로 환경 변수/API 키 로드
+  response = client.messages.create(
+      model="claude-opus-4-6",
+      max_tokens=4096,
+      messages=[
+          {"role": "user", "content": "한글 프롬프트"}
+      ]
+  )
+  
+  result = response.content[0].text
+  ```
+- **장점**: subprocess 불필요, 더 빠르고 직접적, 한글 완벽 지원, 의존성 최소화
+
+### subprocess에서 Claude CLI 호출 시 (레거시)
+- **리스트 형식 사용**: `subprocess.run(["claude", "-p", prompt], ...)`
+- **shell=False 필수**: Windows cmd.exe가 기본 셸이 되면 Claude CLI 명령어 인식 실패
+  ```python
+  # ❌ 위험: Windows에서 실패함
+  result = subprocess.run(cmd_list, shell=True)
+  
+  # ✅ 올바름: 크로스플랫폼 호환
+  result = subprocess.run(cmd_list, shell=False, encoding='utf-8', errors='replace')
+  ```
+- **타임아웃**: 장시간 작업 시 `timeout=300` (초 단위) 지정
+
+### 에이전트 프롬프트 작성 가이드
+- 모든 orchestration_prompt는 한글로 작성
+- 구조: 요청 분석 → 태스크 정의 → 실행 지시사항
+- 예시:
+  ```python
+  orchestration_prompt = """당신은 claude_subprocess_api.md 지침을 따르는 전문 오케스트레이터입니다.
+
+  원본 사용자 요청:
+  {user_request}
+
+  생성된 계획 및 할일:
+  {plan_todo_content}
+
+  3단계 오케스트레이션 패턴을 따르세요:
+  
+  ## 1단계: 계획 검증
+  위 문서의 계획을 검증하고 정제하세요.
+  ...
+  """
+  ```
+
+---
+
 ## Agentic Workflow API
 @claude_tools/claude_subprocess_api.md

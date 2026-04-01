@@ -112,8 +112,8 @@ class SafeOrchestrator:
         print(f"\n>> {agent_type.upper()} Agent running...")
 
         try:
-            # Note: Windows requires shell=True for proper command resolution
-            # Input sanitization via list args prevents injection even with shell=True
+            # Use shell=False with list format for cross-platform compatibility
+            # Input sanitization: list args prevent injection automatically
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -121,7 +121,7 @@ class SafeOrchestrator:
                 encoding='utf-8',
                 errors='replace',
                 timeout=120,
-                shell=True
+                shell=False
             )
 
             output = result.stdout
