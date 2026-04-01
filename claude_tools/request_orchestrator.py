@@ -139,6 +139,8 @@ class RequestOrchestrator:
 
         print("\n>> Claude CLI로 오케스트레이션 실행 중...")
 
+        env = os.environ.copy()
+        env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
         result = subprocess.run(
             [
                 "claude",
@@ -152,7 +154,8 @@ class RequestOrchestrator:
             encoding='utf-8',
             errors='replace',
             timeout=300,
-            shell=False
+            shell=True,
+            env=env
         )
 
         if result.returncode != 0:

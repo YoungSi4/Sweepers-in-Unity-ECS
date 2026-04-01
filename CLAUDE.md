@@ -204,17 +204,70 @@ Claude Code와 상호작용할 때는 **텍스트 기반 인터페이스**만 �
   ```
 - **장점**: subprocess 불필요, 더 빠르고 직접적, 한글 완벽 지원, 의존성 최소화
 
-### subprocess에서 Claude CLI 호출 시 (레거시)
-- **리스트 형식 사용**: `subprocess.run(["claude", "-p", prompt], ...)`
-- **shell=False 필수**: Windows cmd.exe가 기본 셸이 되면 Claude CLI 명령어 인식 실패
+### subprocess에서 Claude CLI 호출 시
+- **shell=True 사용**: Windows에서 claude 명령어를 PATH에서 찾으려면 cmd.exe 경유 필요
+- **git-bash 경로 설정 필수**: Claude CLI가 내부적으로 bash를 요구함
   ```python
-  # ❌ 위험: Windows에서 실패함
-  result = subprocess.run(cmd_list, shell=True)
-  
-  # ✅ 올바름: 크로스플랫폼 호환
-  result = subprocess.run(cmd_list, shell=False, encoding='utf-8', errors='replace')
+  env = os.environ.copy()
+  env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
+  result = subprocess.run(
+      ["claude", "-p", prompt, ...],
+      env=env,
+      shell=True,
+      encoding='utf-8',
+      errors='replace',
+      timeout=300
+  )
   ```
+- **git-bash 위치**: `D:\Git\bin\bash.exe`
 - **타임아웃**: 장시간 작업 시 `timeout=300` (초 단위) 지정
+
+### git 명령어 허용 범위 (claude_tools 한정)
+claude_tools 내 에이전트 및 스크립트는 **읽기 전용 git 명령어만** 허용합니다.
+
+**허용 (읽기 전용):**
+```
+git diff
+git diff --name-only
+git diff --cached
+git status
+git log
+git show
+git blame
+```
+
+---
+
+> ## ⛔ 절대 금지 — 어떠한 경우에도 예외 없음
+>
+> 다음 명령어는 **코드로 작성하거나, 에이전트 프롬프트에 포함하거나, 사용자에게 제안하는 것 모두 금지**합니다.
+>
+> ```
+> git commit        # 변경사항 저장 금지
+> git push          # 원격 저장소 반영 금지
+> git pull          # 원격 변경사항 수신 금지
+> git merge         # 브랜치 병합 금지
+> git rebase        # 커밋 재작성 금지
+> git reset         # 히스토리 변경 금지
+> git checkout      # 브랜치/파일 전환 금지
+> git branch -d/-D  # 브랜치 삭제 금지
+> git stash         # 임시 저장 금지
+> git tag           # 태그 생성/삭제 금지
+> git remote        # 원격 설정 변경 금지
+> git rm            # 파일 삭제 금지
+> ```
+>
+> **이 규칙은 사용자가 명시적으로 요청해도 적용됩니다.**
+> git 쓰기 작업이 필요한 경우 사용자가 직접 실행해야 합니다.
+
+---
+
+에이전트 system_prompt에 반드시 포함:
+```
+절대 금지: git commit, git push, git pull, git merge, git rebase,
+git reset, git checkout, git stash 등 저장소를 변경하는 모든 git 명령어.
+읽기 전용 명령어(git diff, git status, git log)만 사용 가능.
+```
 
 ### 에이전트 프롬프트 작성 가이드
 - 모든 orchestration_prompt는 한글로 작성

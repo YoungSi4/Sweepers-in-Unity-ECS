@@ -112,16 +112,19 @@ class SafeOrchestrator:
         print(f"\n>> {agent_type.upper()} Agent running...")
 
         try:
-            # Use shell=False with list format for cross-platform compatibility
-            # Input sanitization: list args prevent injection automatically
+            # shell=True: Windows에서 PATH 경유 claude 실행 필요
+            # CLAUDE_CODE_GIT_BASH_PATH: Claude CLI 내부 bash 의존성 해결
+            env = os.environ.copy()
+            env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=120,
-                shell=False
+                timeout=300,
+                shell=True,
+                env=env
             )
 
             output = result.stdout
