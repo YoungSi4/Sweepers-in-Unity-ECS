@@ -3,24 +3,25 @@
 """
 Request to Plan & Todo Generator — Safe Agentic Orchestrator
 
-Pipeline: planning -> review -> revised planning -> todo
+Pipeline: planning → review → revised_planning → todo → keyword
+Output: Single markdown file combining Implementation Plan + Todo Checklist
+
+Each agent has a specific persona and role (see request_to_plan_todo_api.md)
+
 Follows claude_subprocess_api.md safety principles
 
 Usage:
     python request_to_plan_todo.py "Your user request here"
 
 Output:
-    claude_tools/outputs/{timestamp}_plan_todo.md
+    claude_tools/outputs/{YYYYMMDD_HHMMSS}_{keyword}.md
 """
 
 import subprocess
-import json
 import sys
-import hashlib
 import os
 from pathlib import Path
 from datetime import datetime
-import shlex
 import io
 
 # Fix Windows console encoding
@@ -31,38 +32,11 @@ class SafeOrchestrator:
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
         self.claude_bin = "claude"
-        self.state_dir = Path(".orchestrator_state")
-        self.fail_dir = Path("fail_report_handoffs")
         self.logs_dir = Path(".agent_logs")
         self.output_dir = Path("claude_tools") / "outputs"
 
-        self.state_dir.mkdir(exist_ok=True)
-        self.fail_dir.mkdir(exist_ok=True)
         self.logs_dir.mkdir(exist_ok=True)
         self.output_dir.mkdir(exist_ok=True)
-
-    def hash_file(self, path):
-        """파일 무결성 검사용 해시"""
-        if not os.path.exists(path):
-            return None
-        with open(path, 'rb') as f:
-            return hashlib.sha256(f.read()).hexdigest()
-
-    def get_request_hash(self, user_request: str) -> str:
-        """요청의 해시값 생성 (캐싱용)"""
-        return hashlib.sha256(user_request.encode()).hexdigest()[:12]
-
-    def load_cached_output(self, request_hash: str) -> str:
-        """캐시된 출력 로드"""
-        cache_file = self.output_dir / f"cache_{request_hash}.md"
-        if cache_file.exists():
-            return cache_file.read_text(encoding='utf-8')
-        return None
-
-    def save_to_cache(self, request_hash: str, content: str):
-        """캐시에 저장"""
-        cache_file = self.output_dir / f"cache_{request_hash}.md"
-        self.write_atomic(str(cache_file), content)
 
     def write_atomic(self, path, content):
         """원자적 파일 쓰기 (data integrity)"""
@@ -80,6 +54,32 @@ class SafeOrchestrator:
         content = f"STDERR:\n{stderr}\n\nSTDOUT:\n{stdout}"
         self.write_atomic(str(log_file), content)
         return str(log_file)
+
+    def _extract_keyword(self, user_request: str) -> str:
+        """요청에서 핵심 keyword 추출 (간단한 텍스트 파싱)"""
+        # Common stop words to ignore
+        stop_words = {
+            'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+            'with', 'from', 'by', 'about', 'of', 'into', 'as', 'would', 'could',
+            'should', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have',
+            'has', 'had', 'do', 'does', 'did', 'will', 'shall', 'may', 'might',
+            'must', 'can', 'want', 'like', 'need', 'make', 'get', 'create', 'build',
+            '를', '을', '이', '가', '에', '서', '로', '만', '도', '까', '기', '한',
+            '고', '면', '는', '고', '있', '다', '라', '자', '어', '것', '같', '되',
+            '주', '저', '있', '새', '하', '좀', '또', '이', '더', '처'
+        }
+
+        # Split and clean
+        words = user_request.lower().split()
+
+        # Find first non-stop word
+        for word in words:
+            clean = ''.join(c for c in word if c.isalnum() or c == '_')
+            if clean and clean not in stop_words and len(clean) > 2:
+                return clean[:20]
+
+        # Fallback
+        return "task"
 
     def run_agent(self, agent_type: str, system_prompt: str, user_prompt: str,
                   allowed_tools: list = None) -> str:
@@ -142,31 +142,25 @@ class SafeOrchestrator:
             return None
 
     def run_workflow(self, user_request: str) -> str:
-        """전체 파이프라인 실행 (캐싱 포함)"""
+        """전체 파이프라인 실행"""
 
         print("\n" + "="*70)
-        print("[PLAN & TODO GENERATOR]")
+        print("[REQUEST TO PLAN & TODO GENERATOR]")
         print("="*70)
         print(f"\nUser Request:\n{user_request}\n")
 
-        # Idempotency check: 동일 요청의 캐시 확인
-        request_hash = self.get_request_hash(user_request)
-        cached_output = self.load_cached_output(request_hash)
-        if cached_output:
-            print("[CACHE HIT] Using previously generated output for this request")
-            print(f"[OUTPUT] Loaded from cache: {self.output_dir}/cache_{request_hash}.md\n")
-            return str(self.output_dir / f"cache_{request_hash}.md")
+        # ============ 1. PLANNING AGENT — 시니어 아키텍트 ============
+        planning_system = """You are a senior software architect and strategic planner with 10+ years of experience.
+Your role is to deeply analyze user requests and produce a structured initial plan.
 
-        # ============ 1. PLANNING AGENT ============
-        planning_system = """You are a senior product architect and strategic planner with 10+ years of experience.
-Your task is to analyze user requests deeply and create comprehensive plans.
-Focus on:
-- Breaking down the request into core components
-- Identifying dependencies and execution order
-- Considering edge cases and potential issues
-- Providing clear, structured output
+Responsibilities:
+- Decompose the request into core components and sub-problems
+- Identify dependencies, risks, and execution order
+- Propose an implementation strategy
+- Flag edge cases and potential blockers
 
-Always output your plan in a clear, numbered format."""
+Output a numbered, structured analysis. Be concise and technical.
+Do NOT ask clarifying questions — work with what you have."""
 
         planning_prompt = f"""Analyze this user request and create a detailed plan:
 
@@ -192,16 +186,18 @@ Output your plan clearly and structurally."""
         if not planning_output:
             return None
 
-        # ============ 2. REVIEW AGENT ============
-        review_system = """You are a meticulous reviewer and quality assurance expert.
-Your task is to critically examine plans and provide constructive feedback.
-Focus on:
-- Identifying gaps or unclear points
-- Questioning assumptions
-- Suggesting improvements
-- Ensuring comprehensiveness
+        # ============ 2. REVIEW AGENT — 아키텍처 검증 전문가 ============
+        review_system = """You are a meticulous code reviewer and architecture validation expert.
+Your role is to critically examine implementation plans and provide actionable feedback.
 
-Provide specific, actionable feedback."""
+Responsibilities:
+- Identify gaps, missing components, or unclear assumptions
+- Verify the approach is feasible and well-ordered
+- Challenge assumptions with specific alternatives
+- Rate completeness, clarity, and feasibility
+
+Output numbered feedback points. Be direct and specific.
+Do NOT rewrite the plan — only provide critique and suggestions."""
 
         review_prompt = f"""Review this plan and provide critical feedback:
 
@@ -230,37 +226,39 @@ Be constructive and specific in your feedback."""
         if not review_output:
             return None
 
-        # ============ 3. REVISED PLANNING AGENT ============
-        revised_system = """You are an expert planner who incorporates feedback expertly.
-Your task is to revise the original plan based on review feedback.
-Focus on:
-- Incorporating all valid suggestions
-- Improving clarity and structure
-- Ensuring logical flow
-- Maintaining feasibility
+        # ============ 3. REVISED PLANNING AGENT — 요구사항 정련 전문가 ============
+        revised_system = """You are an expert implementation planner who synthesizes architectural feedback into refined plans.
+Your role is to produce a final, improved plan incorporating the review feedback.
 
-Output a comprehensive, refined plan."""
+Responsibilities:
+- Address every feedback point from the review
+- Structure the plan into clear phases with components and interfaces
+- Include testing and validation requirements per phase
+- Make the plan detailed enough to hand off to an implementer
 
-        revised_prompt = f"""You are creating an improved implementation plan based on review feedback.
+Output the complete revised plan with phases, components, and implementation steps.
+Do NOT ask questions — produce the final plan directly."""
 
-REQUIREMENT:
-Create a detailed, actionable implementation plan for the following request:
+        revised_prompt = f"""Create an improved implementation plan based on review feedback.
+
+ORIGINAL REQUEST:
 {user_request}
 
-GUIDANCE:
-1. Structure the plan with clear phases (Phase 1, Phase 2, etc.)
-2. Include specific components, systems, or modules to create
-3. Define data structures, APIs, and interfaces
-4. List implementation steps in order
-5. Include validation and testing requirements
-6. Estimate effort/timeline for each phase
+ORIGINAL PLAN:
+{planning_output}
 
-ORIGINAL FEEDBACK TO INCORPORATE:
+REVIEW FEEDBACK TO ADDRESS:
 {review_output}
 
 OUTPUT:
-Generate a comprehensive, revised implementation plan that addresses the feedback above.
-Include phases, specific technical components, implementation steps, and testing criteria.
+Generate a comprehensive, revised implementation plan that:
+1. Addresses every feedback point above
+2. Structures the plan into clear phases (Phase 1, Phase 2, etc.)
+3. Includes specific components, systems, or modules
+4. Lists implementation steps in order
+5. Includes validation and testing requirements per phase
+6. Estimates effort/timeline for each phase
+
 Make it detailed enough to hand off to an implementer."""
 
         revised_output = self.run_agent(
@@ -273,18 +271,20 @@ Make it detailed enough to hand off to an implementer."""
         if not revised_output:
             return None
 
-        # ============ 4. TODO AGENT ============
-        todo_system = """You are an expert task decomposer and project manager.
-Your task is to convert strategic plans into concrete, actionable todos.
-Focus on:
-- Breaking down into specific, measurable tasks
-- Setting clear acceptance criteria
-- Establishing proper sequencing
-- Making tasks self-contained and actionable
+        # ============ 4. TODO AGENT — 프로젝트 매니저 ============
+        todo_system = """You are an expert project manager and task decomposition specialist.
+Your role is to convert implementation plans into granular, trackable todo lists.
 
-Output todos in a well-structured, easy-to-follow format."""
+Responsibilities:
+- Break each plan phase into tasks completable in 1-4 hours
+- Add clear acceptance criteria to every task
+- Mark task dependencies and recommended execution order
+- Group tasks under phase headers with time estimates
 
-        todo_prompt = f"""Convert this implementation plan into a detailed, actionable todo list.
+Output a markdown checklist (- [ ] format).
+Do NOT summarize or ask questions — produce the full todo list directly."""
+
+        todo_prompt = f"""Convert this implementation plan into a detailed, actionable todo checklist.
 
 REQUIREMENT:
 {user_request}
@@ -292,24 +292,24 @@ REQUIREMENT:
 IMPLEMENTATION PLAN:
 {revised_output}
 
-CREATE A TODO LIST that:
+CREATE A TODO CHECKLIST that:
 1. Breaks down each plan section into specific, actionable tasks
 2. Uses [ ] checkbox format for tracking
 3. Includes clear acceptance criteria for each task
 4. Shows dependencies and recommended order
-5. Groups related items under clear section headers
+5. Groups related items under clear section headers (### Phase X: Name)
 6. Each task should be small enough to complete in 1-4 hours
+7. Includes time estimates for each phase
 
 OUTPUT FORMAT:
-Use markdown with clear sections. Example:
-### Phase 1: [Name] ([X-Y hours])
+### Phase X: [Name] ([X-Y hours])
 - [ ] Task 1
   - Acceptance: [Criteria]
   - Dependencies: [What must be done first]
 - [ ] Task 2
   - Acceptance: [Criteria]
 
-Generate the complete todo list for the plan above."""
+Generate the complete todo checklist for the plan above."""
 
         todo_output = self.run_agent(
             "todo",
@@ -321,47 +321,46 @@ Generate the complete todo list for the plan above."""
         if not todo_output:
             return None
 
-        # ============ 5. ASSEMBLE FINAL OUTPUT ============
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = self.output_dir / f"{timestamp}_plan_todo.md"
+        # ============ 5. KEYWORD EXTRACTION — 요청 요약기 ============
+        # Extract keyword from user_request using simple NLP
+        keyword = self._extract_keyword(user_request)
+        print(f"\n>> KEYWORD Extracted: {keyword}")
 
-        final_output = f"""# Plan & Todo Generation — {timestamp}
+        # ============ 6. ASSEMBLE FINAL OUTPUT (Single File) ============
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = self.output_dir / f"{timestamp}_{keyword}.md"
+
+        final_output = f"""# {keyword.capitalize()} — {timestamp}
 
 ## User Request
 {user_request}
 
 ---
 
-## [PLAN] Revised Planning
+## Implementation Plan
 
 {revised_output}
 
 ---
 
-## [TODO] Todo List
+## Todo Checklist
 
 {todo_output}
 
 ---
 
-## [SUMMARY] Generation Summary
-- Planning: [OK] Generated initial plan
-- Review: [OK] Reviewed and provided feedback
-- Revised Planning: [OK] Incorporated feedback
-- Todo: [OK] Generated actionable tasks
+## Metadata
 - Generated at: {datetime.now().isoformat()}
+- Pipeline: planning → review → revised_planning → todo → keyword
+- Keyword: {keyword}
 """
 
         self.write_atomic(str(output_file), final_output)
-
-        # Save to cache for idempotency
-        self.save_to_cache(request_hash, final_output)
 
         print("\n" + "="*70)
         print("[SUCCESS] WORKFLOW COMPLETED")
         print("="*70)
         print(f"\n[OUTPUT] Saved to: {output_file}")
-        print(f"[CACHE] Cached as: cache_{request_hash}.md")
 
         return str(output_file)
 
