@@ -468,14 +468,126 @@ claude_tools/
 ├── request_to_plan_todo_api.md        (This file - API documentation)
 ├── claude_subprocess_api.md           (Safety principles & architecture)
 ├── outputs/
-│   ├── 20260401_152030_refactoring.md (Example output)
-│   └── {YYYYMMDD_HHMMSS}_{keyword}.md (Generated outputs)
+│   ├── 20260401_152030_refactoring.md (Example output - SUCCESS)
+│   └── {YYYYMMDD_HHMMSS}_{keyword}.md (Generated outputs - SUCCESS only)
 └── .agent_logs/
     ├── planning_{timestamp}.log
     ├── review_{timestamp}.log
     ├── revised_planning_{timestamp}.log
     ├── todo_{timestamp}.log
     └── keyword_{timestamp}.log
+```
+
+---
+
+## File Cleanup Policy
+
+### Success Case ✅
+**Condition**: All 5 agents (planning, review, revised_planning, todo, keyword) complete successfully
+
+**Behavior**:
+- ✅ Output file **CREATED AND KEPT** at: `outputs/{YYYYMMDD_HHMMSS}_{keyword}.md`
+- ✅ Agent logs saved to `.agent_logs/` for audit trail
+- ✅ User receives success message with output file path
+
+**Example**:
+```bash
+$ python request_to_plan_todo.py "Create a refactoring tool"
+
+>> PLANNING Agent running...
+[OK] planning Agent completed
+
+>> REVIEW Agent running...
+[OK] review Agent completed
+
+>> REVISED_PLANNING Agent running...
+[OK] revised_planning Agent completed
+
+>> TODO Agent running...
+[OK] todo Agent completed
+
+>> KEYWORD Extracted: refactoring
+
+======================================================================
+[SUCCESS] WORKFLOW COMPLETED
+======================================================================
+
+[OUTPUT] Saved to: claude_tools/outputs/20260401_155138_리팩터링.md
+[POLICY] Output created only because all 5 agents succeeded
+```
+
+---
+
+### Failure Case ❌
+**Condition**: Any agent fails (planning, review, revised_planning, todo, or keyword extraction)
+
+**Behavior**:
+- ❌ Output file is **NOT CREATED** (early return on first failure)
+- ✅ Agent logs are **KEPT IN `.agent_logs/`** for debugging
+- ✅ No partial/incomplete output files generated
+- ✅ User receives clear error message with log location
+
+**Rationale**: 
+Partial outputs from failed runs are not useful and create clutter. Only fully successful runs produce meaningful documentation.
+
+**Example**:
+```bash
+$ python request_to_plan_todo.py "Some request"
+
+>> PLANNING Agent running...
+[OK] planning Agent completed
+
+>> REVIEW Agent running...
+[OK] review Agent completed
+
+>> REVISED_PLANNING Agent running...
+[FAIL] revised_planning Agent failed
+       Log: .agent_logs/revised_planning_2026-04-01T15-49-43.log
+       Error: [timeout or other error]
+
+[ERROR] One or more agents encountered errors.
+   Logs saved to: .agent_logs/
+
+[CLEANUP POLICY]
+   ✓ Output file was NOT created (failure detected)
+   ✓ No partial/incomplete files generated
+   ✓ Agent logs kept for debugging
+```
+
+---
+
+### Implementation Details
+
+**Code Flow**:
+```python
+# Each agent has this pattern:
+agent_output = self.run_agent(...)
+
+if not agent_output:
+    # Early exit: No output file created (cleanup policy)
+    return None
+
+# If any agent returns None, run_workflow returns None
+# This prevents output file creation
+```
+
+**File Generation**:
+- Output file is created **ONLY** after all agents succeed
+- File generation is the **LAST STEP** of run_workflow()
+- If any prior step fails, None is returned (no file created)
+
+**Result Handling in main()**:
+```python
+result = orchestrator.run_workflow(user_request)
+
+if result:
+    # Success: file was created
+    print(f"[OK] Output file created at:\n   {result}")
+else:
+    # Failure: no file created per cleanup policy
+    print("[CLEANUP POLICY]")
+    print("   ✓ Output file was NOT created")
+    print("   ✓ Agent logs kept for debugging")
 ```
 
 ---

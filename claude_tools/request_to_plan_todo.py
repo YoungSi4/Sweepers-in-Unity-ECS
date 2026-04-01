@@ -10,11 +10,16 @@ Each agent has a specific persona and role (see request_to_plan_todo_api.md)
 
 Follows claude_subprocess_api.md safety principles
 
+CLEANUP POLICY:
+- SUCCESS: All 5 agents succeed → Output file created at outputs/{YYYYMMDD_HHMMSS}_{keyword}.md
+- FAILURE: Any agent fails → No output file created (early return)
+  - Agent logs still saved to .agent_logs/ for debugging
+
 Usage:
     python request_to_plan_todo.py "Your user request here"
 
 Output:
-    claude_tools/outputs/{YYYYMMDD_HHMMSS}_{keyword}.md
+    claude_tools/outputs/{YYYYMMDD_HHMMSS}_{keyword}.md (SUCCESS only)
 """
 
 import subprocess
@@ -142,7 +147,13 @@ class SafeOrchestrator:
             return None
 
     def run_workflow(self, user_request: str) -> str:
-        """전체 파이프라인 실행"""
+        """
+        전체 5-agent 파이프라인 실행
+
+        Returns:
+            str: Output file path if ALL agents succeed
+            None: If any agent fails (no file created per cleanup policy)
+        """
 
         print("\n" + "="*70)
         print("[REQUEST TO PLAN & TODO GENERATOR]")
@@ -184,6 +195,7 @@ Output your plan clearly and structurally."""
         )
 
         if not planning_output:
+            # Early exit: No output file created (cleanup policy)
             return None
 
         # ============ 2. REVIEW AGENT — 아키텍처 검증 전문가 ============
@@ -224,6 +236,7 @@ Be constructive and specific in your feedback."""
         )
 
         if not review_output:
+            # Early exit: No output file created (cleanup policy)
             return None
 
         # ============ 3. REVISED PLANNING AGENT — 요구사항 정련 전문가 ============
@@ -269,6 +282,7 @@ Make it detailed enough to hand off to an implementer."""
         )
 
         if not revised_output:
+            # Early exit: No output file created (cleanup policy)
             return None
 
         # ============ 4. TODO AGENT — 프로젝트 매니저 ============
@@ -319,6 +333,7 @@ Generate the complete todo checklist for the plan above."""
         )
 
         if not todo_output:
+            # Early exit: No output file created (cleanup policy)
             return None
 
         # ============ 5. KEYWORD EXTRACTION — 요청 요약기 ============
@@ -326,7 +341,8 @@ Generate the complete todo checklist for the plan above."""
         keyword = self._extract_keyword(user_request)
         print(f"\n>> KEYWORD Extracted: {keyword}")
 
-        # ============ 6. ASSEMBLE FINAL OUTPUT (Single File) ============
+        # ============ 6. ASSEMBLE FINAL OUTPUT (Only on SUCCESS) ============
+        # All agents succeeded, now create the output file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = self.output_dir / f"{timestamp}_{keyword}.md"
 
@@ -361,6 +377,7 @@ Generate the complete todo checklist for the plan above."""
         print("[SUCCESS] WORKFLOW COMPLETED")
         print("="*70)
         print(f"\n[OUTPUT] Saved to: {output_file}")
+        print(f"[POLICY] Output created only because all 5 agents succeeded")
 
         return str(output_file)
 
@@ -387,7 +404,11 @@ def main():
         sys.exit(0)
     else:
         print("\n[ERROR] One or more agents encountered errors.")
-        print(f"   Check logs in: {orchestrator.logs_dir}\n")
+        print(f"   Logs saved to: {orchestrator.logs_dir}/")
+        print(f"\n[CLEANUP POLICY]")
+        print(f"   ✓ Output file was NOT created (failure detected)")
+        print(f"   ✓ No partial/incomplete files generated")
+        print(f"   ✓ Agent logs kept for debugging\n")
         sys.exit(1)
 
 
