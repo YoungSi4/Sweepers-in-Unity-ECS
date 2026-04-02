@@ -57,10 +57,14 @@ class CsCodeReviewer:
             # 최종 프롬프트: system prompt + user message
             final_message = f"{system_prompt}\n\n---\n\n{user_message}"
 
-            # Claude CLI 호출 (stdin으로 프롬프트 전달)
+            # Claude CLI 호출 (stdin + Read tool 순차 실행)
+            # 1. stdin으로 프롬프트 전달 (EOF 후 종료)
+            # 2. Claude가 Read tool로 파일 접근
             cmd_str = (
                 f'claude -p '
-                f'--model claude-haiku-4-5-20251001'
+                f'--model claude-haiku-4-5-20251001 '
+                f'--tools Read '
+                f'--add-dir {shlex.quote(str(self.project_root))}'
             )
 
             env = os.environ.copy()
@@ -68,7 +72,7 @@ class CsCodeReviewer:
 
             result = subprocess.run(
                 cmd_str,
-                input=final_message,
+                input=final_message,  # stdin으로 전달, EOF 자동 발생
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -82,9 +86,13 @@ class CsCodeReviewer:
             output = result.stdout
 
             if result.returncode != 0:
-                print(f"[FAIL] {agent_name} Agent 실패")
+                print(f"[FAIL] {agent_name} Agent 실패 (returncode={result.returncode})")
                 if result.stderr:
-                    print(f"       stderr: {result.stderr[:500]}")
+                    print(f"       stderr: {result.stderr[:1000]}")
+                return None
+
+            if not output or len(output.strip()) == 0:
+                print(f"[FAIL] {agent_name} Agent: 빈 출력 반환")
                 return None
 
             print(f"[OK] {agent_name} Agent 완료")
@@ -105,25 +113,14 @@ class CsCodeReviewer:
     ) -> str:
         """Stage 1: Planner — 코드 분석 & 리팩터링 계획
 
-        프롬프트 첫줄에서 planner 에이전트 역할만 명시
-        실제 System Prompt는 .claude/agents/planner.md에서 로드됨
+        파일 경로를 주고 Claude가 직접 Read tool로 읽도록
         """
 
         user_message = f"""당신은 C# 코드 분석 및 리팩터링 전략 전문가(planner 에이전트)입니다.
 
-파일 경로: {filepath}
+파일: {filepath}
 
-원본 코드:
-```csharp
-{code}
-```
-
-Git 변경사항:
-```diff
-{diff if diff else "(신규 파일)"}
-```
-
-위 코드를 8가지 기준(네이밍, ECS/DOTS, Burst, 메모리, 복잡도, 성능, 문서화, 안전성)으로 분석하고
+위 파일을 읽고, 8가지 기준(네이밍, ECS/DOTS, Burst, 메모리, 복잡도, 성능, 문서화, 안전성)으로 분석하여
 리팩터링 계획을 [P1]/[P2]/[P3] 우선순위로 작성해주세요.
 코드 예시는 금지됩니다. 변경 방향만 설명하세요."""
 
@@ -139,12 +136,9 @@ Git 변경사항:
 
         user_message = f"""당신은 코드 리뷰 및 품질 검증 전문가(reviewer 에이전트)입니다.
 
-파일 경로: {filepath}
+파일: {filepath}
 
-원본 코드:
-```csharp
-{code}
-```
+위 파일을 읽고, 다음 Planner 계획을 평가하세요:
 
 Planner 분석 및 계획:
 {plan}
@@ -209,12 +203,9 @@ Planner의 각 항목을 평가하세요:
             # 초기 구현
             user_message = f"""당신은 C# Unity ECS/DOTS 구현 전문가(coder 에이전트)입니다.
 
-파일 경로: {filepath}
+파일: {filepath}
 
-원본 코드:
-```csharp
-{code}
-```
+위 파일을 읽고, 다음 계획과 피드백을 100% 반영하여 리팩터링된 완전한 C# 코드를 작성해주세요.
 
 Planner 최종 계획:
 {plan}
@@ -223,8 +214,6 @@ Reviewer 피드백:
 {review}
 
 ---
-
-위 계획과 피드백을 100% 반영하여 리팩터링된 완전한 C# 코드를 작성해주세요.
 CLAUDE.md의 컨벤션(PascalCase, _camelCase, IComponentData, ISystem, BurstCompile 등)을 모두 준수하세요.
 
 출력 형식:
@@ -249,12 +238,9 @@ CLAUDE.md의 컨벤션(PascalCase, _camelCase, IComponentData, ISystem, BurstCom
             # 재작업
             user_message = f"""당신은 C# Unity ECS/DOTS 구현 전문가(coder 에이전트)입니다.
 
-파일 경로: {filepath}
+파일: {filepath}
 
-원본 코드:
-```csharp
-{code}
-```
+위 파일을 읽고, 다음 피드백을 반영하여 코드를 재구현해주세요.
 
 Planner 최종 계획:
 {plan}
@@ -469,6 +455,10 @@ Planner 최종 계획:
             if not review:
                 print("[FAIL] Reviewer 실패")
                 return
+
+            # DEBUG: Reviewer 출력 확인
+            print(f"\n[DEBUG] Reviewer 출력 (전체 길이: {len(review)}글자):")
+            print(f"[DEBUG] 마지막 500글자:\n{review[-500:]}\n")
 
             # APPROVED 여부 판정
             is_approved = "APPROVED" in review.upper()
