@@ -1,0 +1,8 @@
+I've loaded the context for your Sweepers in ECS project. I can see:
+
+- **Project**: Unity 6 + DOTS/ECS with URP
+- **Key Files Modified**: CLAUDE.md, cs_code_reviewer.py
+- **Pending Work**: Several untracked files (Assets/Scripts, docs/, .claude/)
+- **Memory Available**: Project overview and claude_tools v3 plan
+
+What would you like to work on?

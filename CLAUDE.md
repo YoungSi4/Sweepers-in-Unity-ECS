@@ -107,6 +107,192 @@ public class SpeedAuthoring : MonoBehaviour
 - `BurstCompile` 시스템 내에서 관리형(Managed) 타입 사용 금지
 - 불필요한 `Allocator.Persistent` NativeContainer 생성 금지 — 수명 관리 명확히 할 것
 
+### 파일 삭제 규칙
+- ⛔ **`rm -rf` 명령을 자동으로 실행하지 말 것**
+- 삭제할 파일이나 폴더가 있으면, 경로와 대상을 사용자에게 명확히 **알리고 승인 받을 것**
+- 사용자가 직접 `rm -rf`를 실행하거나, "진행하세요"라고 명시 지시해야만 실행 가능
+- 이유: 파일 삭제는 되돌릴 수 없는 작업이므로, 사용자의 최종 판단 필수
+
+## 부모/서브 에이전트 아키텍처 (Multi-Agent Orchestration)
+
+### 개념
+
+**부모 에이전트 (Parent Agent)**
+- 스크립트(`claude_tools/cs_code_reviewer.py` 등)가 직접 제어하는 orchestrator
+- 서브 에이전트들의 실행 순서 결정
+- 에이전트 간 context 수집 및 전달
+- 사용자 상호작용 관리 (User Approval)
+
+**서브 에이전트 (Sub-Agent)**
+- `.claude/agents/` 에 정의된 개별 에이전트
+- 특정 task를 독립적으로 수행
+- 부모 에이전트로부터 context를 받아 작업
+- 결과물을 부모 에이전트로 반환
+
+### 예시: C# Code Reviewer Pipeline
+
+```
+부모 에이전트 (cs_code_reviewer.py)
+    ├─ 파일 읽기 + git diff 생성
+    ├─ Planner (서브 에이전트 호출)
+    │  └─ .claude/agents/planner.md
+    │     입력: 코드 + diff
+    │     출력: 리팩터링 계획 (plan_v1)
+    │
+    ├─ [재작업 루프] Reviewer가 8점 미만이면 반복
+    │  ├─ Reviewer (서브 에이전트 호출)
+    │  │  └─ .claude/agents/reviewer.md
+    │  │     입력: 코드 + plan
+    │  │     출력: 평가 점수 + 피드백
+    │  │
+    │  └─ Planner 재실행 (피드백 포함)
+    │
+    ├─ User Approval 1 (사용자 선택)
+    │  └─ 터미널 input()으로 승인/거부 수집
+    │
+    ├─ Coder (서브 에이전트 호출)
+    │  └─ .claude/agents/coder.md
+    │     입력: 코드 + plan + reviewer_feedback
+    │     출력: 리팩터링된 코드
+    │
+    ├─ [무제한 재작업 루프]
+    │  ├─ User Approval 2 (사용자 선택)
+    │  │  └─ 승인 / 거부(폐기) / 거부(재작업)
+    │  │
+    │  └─ 재작업 시: Coder 다시 호출 (사용자 피드백 포함)
+    │
+    └─ 파일 적용 (백업 + 원자적 쓰기)
+```
+
+### 에이전트 간 Context 전달 방식
+
+#### 방식 1: 프롬프트 임베딩 (권장)
+각 서브 에이전트 호출 시, 이전 단계의 output을 프롬프트에 직접 포함:
+
+```python
+# Planner 실행
+plan_output = call_agent(
+    agent_name="planner",
+    user_input=f"""파일: {filepath}
+원본 코드:
+```csharp
+{code}
+```"""
+)
+
+# Reviewer 실행 (Planner output 포함)
+review_output = call_agent(
+    agent_name="reviewer",
+    user_input=f"""파일: {filepath}
+원본 코드:
+```csharp
+{code}
+```
+
+Planner 계획:
+{plan_output}"""
+)
+
+# Coder 실행 (Plan + Review output 포함)
+coder_output = call_agent(
+    agent_name="coder",
+    user_input=f"""파일: {filepath}
+원본 코드:
+```csharp
+{code}
+```
+
+Planner 계획:
+{plan_output}
+
+Reviewer 피드백:
+{review_output}"""
+)
+```
+
+**장점:**
+- 에이전트가 전체 context를 명확히 이해
+- 파일 시스템 의존성 없음
+- 디버깅 용이
+
+#### 방식 2: 파일 기반 (선택사항)
+각 단계의 output을 별도 파일에 저장하고 참조:
+
+```python
+# 파일에 저장
+def save_context(stage: str, output: str):
+    path = Path(f".review_context/{stage}.md")
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(output, encoding='utf-8')
+
+# 파일에서 로드
+def load_context(stage: str) -> str:
+    return Path(f".review_context/{stage}.md").read_text(encoding='utf-8')
+
+# 사용
+save_context("plan", plan_output)
+review_output = call_agent(
+    agent_name="reviewer",
+    user_input=f"파일: {filepath}\n이전 Planner 결과: [파일 참조: .review_context/plan.md]"
+)
+```
+
+**장점:**
+- 큰 context를 프롬프트에 완전히 포함할 필요 없음
+- 각 단계 output을 기록/추적 가능
+
+### User Approval 구현
+
+User Approval은 agent가 아니라 **사용자 상호작용 프로세스**:
+
+```python
+def show_user_approval_1(plan: str, review: str) -> str:
+    """변경 예정사항 표시 + 사용자 선택"""
+    print(f"""
+변경 예정사항 요약:
+{plan}
+
+Reviewer 점수: {review}
+
+진행하시겠습니까?
+""")
+    choice = input("선택 (승인/거부): ").strip()
+    return choice
+
+def show_user_approval_2(original: str, refactored: str) -> dict:
+    """변경된 코드 표시 + 사용자 선택 (3가지)"""
+    print(f"""
+변경 전:
+{original}
+
+변경 후:
+{refactored}
+""")
+    choice = input("선택 (승인/거부): ").strip()
+    
+    if choice == "거부":
+        sub_choice = input("사유 (폐기/재작업): ").strip()
+        if sub_choice == "재작업":
+            problems = input("문제점: ").strip()
+            improvements = input("개선방향: ").strip()
+            return {
+                "choice": "재작업",
+                "feedback": {"problems": problems, "improvements": improvements}
+            }
+    
+    return {"choice": choice}
+```
+
+### 정리
+
+| 단계 | 타입 | 위치 | 역할 |
+|------|------|------|------|
+| Planner | 서브 에이전트 | `.claude/agents/planner.md` | 코드 분석 + 계획 |
+| Reviewer | 서브 에이전트 | `.claude/agents/reviewer.md` | 계획 평가 |
+| UA1 | 사용자 상호작용 | `.claude/prompts/user_approval_1.md` | 사전 승인 |
+| Coder | 서브 에이전트 | `.claude/agents/coder.md` | 코드 구현 |
+| UA2 | 사용자 상호작용 | `.claude/prompts/user_approval_2.md` | 최종 검토 |
+
 ## 토큰 최적화
 
 Claude Code는 제한된 토큰 예산으로 작동합니다. 토큰을 낭비하지 않으려면:

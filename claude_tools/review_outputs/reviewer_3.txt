@@ -1,0 +1,8 @@
+I've loaded the project context for **Sweepers in ECS** (Unity 6 + DOTS/ECS). I can see:
+
+- Project structure and code conventions documented in CLAUDE.md
+- Agentic workflow safety principles in claude_subprocess_api.md
+- Recent memory about the project overview and claude_tools implementation plan
+- Recent commits working on a code review/refactor tool
+
+What would you like me to help with?

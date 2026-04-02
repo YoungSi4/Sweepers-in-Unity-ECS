@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-C# Code Review & Refactoring Tool
-Assets/Scripts 경로의 C# 스크립트를 읽고 변경사항을 확인하여
-코드 리뷰 및 리팩터링을 수행합니다.
+C# Code Reviewer & Refactoring Tool — 6-Stage Agentic Pipeline
 
-Pipeline: planner → reviewer → coder
+Architecture: Parent Agent (Orchestrator) + Sub-Agents via Claude CLI
+- Parent: cs_code_reviewer.py (orchestration via subprocess, user interaction)
+- Sub-Agents: .claude/agents/planner.md, reviewer.md, coder.md (Claude Code managed)
+- User Approvals: Terminal-based decision points
 
-- planner : 코드 분석 및 리팩터링 계획 수립 (코드 직접 작성 금지)
-- reviewer: 계획 및 코드 품질 검토 (코드 직접 작성 금지)
-- coder   : 계획 기반 실제 코드 수정 (계획 수정 금지, 구현만 담당)
-
-Usage:
-    python cs_code_reviewer.py [--target <파일경로>] [--all]
-
-    --target : 특정 .cs 파일 지정 (예: Assets/Scripts/Systems/MoveSystem.cs)
-    --all    : Assets/Scripts 내 모든 변경된 .cs 파일 대상
-
-Output:
-    claude_tools/review_outputs/{timestamp}_{filename}_review.md
+Pipeline: Planner → Reviewer → UA1 → Coder → UA2 → File Apply
 """
 
 import subprocess
@@ -27,390 +17,551 @@ import os
 from pathlib import Path
 from datetime import datetime
 import io
+import shutil
+import argparse
+import shlex
+import json
 
 # Fix Windows console encoding
-if sys.platform == 'win32' and not isinstance(sys.stdout, io.TextIOWrapper):
-    try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    except:
-        pass
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 
 class CsCodeReviewer:
-    def __init__(self, project_root: str):
+    """6-stage C# code review & refactoring orchestrator"""
+
+    def __init__(self, project_root: str, auto_approve: bool = False):
         self.project_root = Path(project_root)
-        self.scripts_dir = self.project_root / "Assets" / "Scripts"
+        self.claude_bin = "claude"
         self.output_dir = Path("claude_tools") / "review_outputs"
-        self.logs_dir = Path(".agent_logs")
         self.output_dir.mkdir(exist_ok=True)
-        self.logs_dir.mkdir(exist_ok=True)
+        self.auto_approve = auto_approve
 
-    # ------------------------------------------------------------------ #
-    #  Git 유틸리티                                                        #
-    # ------------------------------------------------------------------ #
+    def call_agent(
+        self,
+        agent_name: str,
+        user_message: str
+    ) -> str:
+        """Sub-agent 호출 via Claude CLI (docs/prompts에서 시스템 프롬프트 로드)"""
 
-    def get_changed_cs_files(self) -> list:
-        """git diff로 Assets/Scripts 내 변경된 .cs 파일 목록 반환"""
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            cwd=str(self.project_root)
-        )
-        staged = subprocess.run(
-            ["git", "diff", "--name-only", "--cached"],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            cwd=str(self.project_root)
-        )
-
-        all_files = result.stdout.split('\n') + staged.stdout.split('\n')
-        cs_files = [
-            f.strip() for f in all_files
-            if f.strip().endswith('.cs') and 'Assets/Scripts' in f
-        ]
-        return list(set(cs_files))
-
-    def get_git_diff(self, filepath: str) -> str:
-        """특정 파일의 git diff 반환"""
-        result = subprocess.run(
-            ["git", "diff", "HEAD", "--", filepath],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            cwd=str(self.project_root)
-        )
-        if not result.stdout:
-            # staged 변경사항 확인
-            result = subprocess.run(
-                ["git", "diff", "--cached", "--", filepath],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                cwd=str(self.project_root)
-            )
-        return result.stdout
-
-    def get_file_content(self, filepath: str) -> str:
-        """파일 전체 내용 반환"""
-        full_path = self.project_root / filepath
-        if not full_path.exists():
-            return f"[파일 없음: {filepath}]"
-        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
-            return f.read()
-
-    # ------------------------------------------------------------------ #
-    #  Agent 실행                                                          #
-    # ------------------------------------------------------------------ #
-
-    def run_agent(self, agent_type: str, system_prompt: str, user_prompt: str) -> str:
-        """Claude CLI subprocess로 agent 호출"""
-
-        cmd = [
-            "claude",
-            "-p", user_prompt,
-            "-s", system_prompt,
-            "--model", "claude-haiku-4-5-20251001",
-            "--cwd", str(self.project_root),
-            "--allowedTools", "Read,Glob,Grep"
-        ]
-
-        print(f"\n>> [{agent_type.upper()} AGENT] 실행 중...")
+        print(f"\n>> {agent_name.upper()} Agent 실행 중...\n")
 
         try:
+            # docs/prompts/{agent_name}.md에서 시스템 프롬프트 로드
+            agent_prompt_path = self.project_root / "docs" / "prompts" / f"{agent_name}.md"
+
+            system_prompt = ""
+            if agent_prompt_path.exists():
+                system_prompt = agent_prompt_path.read_text(encoding='utf-8')
+
+            # 최종 프롬프트: system prompt + user message
+            final_message = f"{system_prompt}\n\n---\n\n{user_message}"
+
+            # Claude CLI 호출 (stdin으로 프롬프트 전달)
+            cmd_str = (
+                f'claude -p '
+                f'--model claude-haiku-4-5-20251001'
+            )
+
             env = os.environ.copy()
             env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
+
             result = subprocess.run(
-                cmd,
+                cmd_str,
+                input=final_message,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=180,
+                timeout=300,
                 shell=True,
+                cwd=str(self.project_root),
                 env=env
             )
 
-            # 로그 저장
-            timestamp = datetime.now().isoformat().replace(':', '-')
-            log_file = self.logs_dir / f"{agent_type}_{timestamp}.log"
-            with open(log_file, 'w', encoding='utf-8') as f:
-                f.write(f"STDERR:\n{result.stderr}\n\nSTDOUT:\n{result.stdout}")
+            output = result.stdout
 
             if result.returncode != 0:
-                print(f"[오류] {agent_type} agent 실패")
-                print(f"       로그: {log_file}")
+                print(f"[FAIL] {agent_name} Agent 실패")
                 if result.stderr:
-                    print(f"       에러: {result.stderr[:200]}")
+                    print(f"       stderr: {result.stderr[:500]}")
                 return None
 
-            print(f"[완료] {agent_type} agent 완료")
-            return result.stdout
+            print(f"[OK] {agent_name} Agent 완료")
+            return output
 
         except subprocess.TimeoutExpired:
-            print(f"[타임아웃] {agent_type} agent 180초 초과")
+            print(f"[TIMEOUT] {agent_name} Agent 타임아웃 (300초)")
             return None
         except Exception as e:
-            print(f"[오류] {agent_type} agent 예외: {e}")
+            print(f"[ERROR] {agent_name} Agent 오류: {e}")
             return None
 
-    # ------------------------------------------------------------------ #
-    #  Agent 페르소나 & 프롬프트 (TODO: 추후 구체화)                        #
-    # ------------------------------------------------------------------ #
+    def run_planner(
+        self,
+        filepath: str,
+        code: str,
+        diff: str
+    ) -> str:
+        """Stage 1: Planner — 코드 분석 & 리팩터링 계획
 
-    def run_planner(self, file_content: str, git_diff: str, filepath: str) -> str:
+        프롬프트 첫줄에서 planner 에이전트 역할만 명시
+        실제 System Prompt는 .claude/agents/planner.md에서 로드됨
         """
-        Planner Agent
-        역할: 코드 분석 및 리팩터링 계획 수립
-        제약: 코드를 직접 작성하지 않음
-        페르소나: TODO - 추후 구체화
-        """
-        system_prompt = """당신은 코드 분석 및 리팩터링 계획 전문가입니다.
-코드를 분석하고 개선 계획을 수립하는 것이 역할입니다.
 
-중요 제약:
-- 절대 코드를 직접 작성하지 않습니다
-- 계획과 지시사항만 작성합니다
-- 구체적인 코드 예시 대신 변경해야 할 부분과 이유를 설명합니다"""
-
-        user_prompt = f"""다음 C# 파일을 분석하고 리팩터링 계획을 수립하세요.
-
-파일 경로: {filepath}
-
-파일 전체 내용:
-```csharp
-{file_content}
-```
-
-Git 변경사항 (diff):
-```diff
-{git_diff if git_diff else "(변경사항 없음 - 신규 파일 또는 미추적 파일)"}
-```
-
-다음 항목을 포함하는 리팩터링 계획을 작성하세요:
-
-## 코드 품질 분석
-- 현재 코드의 문제점 목록
-
-## CLAUDE.md 컨벤션 위반 여부
-- 네이밍 규칙 (PascalCase, _camelCase 등)
-- ECS/DOTS 패턴 준수 여부
-- BurstCompile 적용 여부
-
-## 리팩터링 계획
-- 수정해야 할 항목 (우선순위 포함)
-- 각 항목별 수정 이유
-
-## 주의사항
-- Coder agent가 구현 시 주의할 점"""
-
-        return self.run_agent("planner", system_prompt, user_prompt)
-
-    def run_reviewer(self, file_content: str, git_diff: str, plan: str, filepath: str) -> str:
-        """
-        Reviewer Agent
-        역할: 계획 검토 및 코드 품질 검증
-        제약: 코드를 직접 작성하지 않음
-        페르소나: TODO - 추후 구체화
-        """
-        system_prompt = """당신은 코드 리뷰 및 아키텍처 검증 전문가입니다.
-계획의 적절성을 검토하고 코드 품질 문제를 발견하는 것이 역할입니다.
-
-중요 제약:
-- 절대 코드를 직접 작성하지 않습니다
-- 리뷰 피드백과 승인/거부 의견만 작성합니다
-- 추가 발견된 문제점과 계획 보완 사항을 명시합니다"""
-
-        user_prompt = f"""Planner가 수립한 계획을 검토하고 코드를 리뷰하세요.
-
-파일 경로: {filepath}
-
-코드:
-```csharp
-{file_content}
-```
-
-Git 변경사항:
-```diff
-{git_diff if git_diff else "(변경사항 없음)"}
-```
-
-Planner 계획:
-{plan}
-
-다음 항목을 포함하는 리뷰 결과를 작성하세요:
-
-## 계획 검토
-- 계획이 적절한지 평가
-- 누락된 개선사항 있으면 추가
-
-## 코드 리뷰
-- Planner가 발견하지 못한 추가 문제점
-- 성능 및 메모리 안전성 검토
-- ECS/DOTS 패턴 정합성
-
-## 최종 승인
-- APPROVED / NEEDS_REVISION
-- 승인 또는 수정이 필요한 이유"""
-
-        return self.run_agent("reviewer", system_prompt, user_prompt)
-
-    def run_coder(self, file_content: str, plan: str, review: str, filepath: str) -> str:
-        """
-        Coder Agent
-        역할: 계획 기반 실제 코드 수정
-        제약: 계획을 수정하지 않고 구현만 담당
-        페르소나: TODO - 추후 구체화
-        """
-        system_prompt = """당신은 C# Unity ECS/DOTS 구현 전문가입니다.
-Planner의 계획과 Reviewer의 피드백을 받아 코드를 구현하는 것이 역할입니다.
-
-중요 제약:
-- 계획을 수정하거나 새로운 계획을 세우지 않습니다
-- 주어진 계획과 리뷰 피드백에 따라 구현만 담당합니다
-- CLAUDE.md 컨벤션을 철저히 준수합니다"""
-
-        user_prompt = f"""Planner 계획과 Reviewer 피드백을 바탕으로 코드를 리팩터링하세요.
+        user_message = f"""당신은 C# 코드 분석 및 리팩터링 전략 전문가(planner 에이전트)입니다.
 
 파일 경로: {filepath}
 
 원본 코드:
 ```csharp
-{file_content}
+{code}
 ```
 
-Planner 계획:
+Git 변경사항:
+```diff
+{diff if diff else "(신규 파일)"}
+```
+
+위 코드를 8가지 기준(네이밍, ECS/DOTS, Burst, 메모리, 복잡도, 성능, 문서화, 안전성)으로 분석하고
+리팩터링 계획을 [P1]/[P2]/[P3] 우선순위로 작성해주세요.
+코드 예시는 금지됩니다. 변경 방향만 설명하세요."""
+
+        return self.call_agent("planner", user_message)
+
+    def run_reviewer(
+        self,
+        filepath: str,
+        code: str,
+        plan: str
+    ) -> str:
+        """Stage 2: Reviewer — 완성도 & 실현가능성 평가 (8점 이상 = APPROVED)"""
+
+        user_message = f"""당신은 코드 리뷰 및 품질 검증 전문가(reviewer 에이전트)입니다.
+
+파일 경로: {filepath}
+
+원본 코드:
+```csharp
+{code}
+```
+
+Planner 분석 및 계획:
+{plan}
+
+---
+
+Planner의 각 항목을 평가하세요:
+1. 완성도 (Completeness): 1-10점
+2. 실현 가능성 (Feasibility): 1-10점
+3. 종합 점수 = (완성도 + 실현 가능성) / 2
+
+**통과 기준**: 평균 8점 이상 → 출력에 "APPROVED" 포함
+**재작업**: 8점 미만 → 출력에 "NEEDS_REVISION" 포함
+
+각 항목별 점수와 이유를 상세히 제시해주세요."""
+
+        return self.call_agent("reviewer", user_message)
+
+    def show_ua1(
+        self,
+        filepath: str,
+        plan: str,
+        review: str
+    ) -> str:
+        """Stage 3: User Approval 1 — 변경 예정사항 확인"""
+
+        print("\n" + "="*70)
+        print("변경 예정 사항 (User Approval 1)")
+        print("="*70)
+        print(f"\n파일: {filepath}")
+        print(f"\nPlanner 계획:\n{plan}")
+        print(f"\nReviewer 평가:\n{review}")
+        print("\n" + "="*70)
+
+        # auto_approve 모드면 자동 승인
+        if self.auto_approve:
+            choice = "승인"
+            print("[자동 모드] 변경사항 승인")
+        else:
+            try:
+                choice = sys.stdin.readline().strip()
+                if not choice:
+                    choice = "거부"
+            except EOFError:
+                choice = "거부"
+
+        print("="*70 + "\n")
+
+        return choice if choice in ["승인", "거부"] else "거부"
+
+    def run_coder(
+        self,
+        filepath: str,
+        code: str,
+        plan: str,
+        review: str,
+        rework_feedback: dict = None
+    ) -> str:
+        """Stage 4: Coder — 리팩터링 코드 구현 (초기 또는 재작업)"""
+
+        if rework_feedback is None:
+            # 초기 구현
+            user_message = f"""당신은 C# Unity ECS/DOTS 구현 전문가(coder 에이전트)입니다.
+
+파일 경로: {filepath}
+
+원본 코드:
+```csharp
+{code}
+```
+
+Planner 최종 계획:
 {plan}
 
 Reviewer 피드백:
 {review}
 
-다음을 포함하는 리팩터링 결과를 작성하세요:
+---
 
-## 수정된 코드
-전체 리팩터링된 코드를 ```csharp 코드블록으로 작성하세요.
+위 계획과 피드백을 100% 반영하여 리팩터링된 완전한 C# 코드를 작성해주세요.
+CLAUDE.md의 컨벤션(PascalCase, _camelCase, IComponentData, ISystem, BurstCompile 등)을 모두 준수하세요.
+
+출력 형식:
+## 리팩터링된 코드
+
+```csharp
+[전체 리팩터링된 코드]
+```
 
 ## 변경 사항 요약
-- 어떤 부분을 왜 수정했는지 목록으로 작성
 
-## 미적용 항목
-- 계획 중 적용하지 않은 항목과 이유 (있는 경우)"""
+### [P1] 항목명
+- 변경 내용: {{구체적 변경}}
+- 라인: {{변경된 라인 범위}}
+- 이유: {{Planner 계획의 이유}}
 
-        return self.run_agent("coder", system_prompt, user_prompt)
+...
 
-    # ------------------------------------------------------------------ #
-    #  파이프라인 실행                                                      #
-    # ------------------------------------------------------------------ #
+## 구현 완성도
+- 계획 대비 구현율: 100%"""
+        else:
+            # 재작업
+            user_message = f"""당신은 C# Unity ECS/DOTS 구현 전문가(coder 에이전트)입니다.
 
-    def write_atomic(self, path, content):
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f"{path}.tmp"
-        with open(tmp, 'w', encoding='utf-8') as f:
-            f.write(content)
-        os.replace(tmp, path)
+파일 경로: {filepath}
 
-    def review_file(self, filepath: str) -> str:
-        """단일 파일 리뷰 파이프라인 실행"""
-        print(f"\n{'='*70}")
-        print(f"[CS CODE REVIEWER] {filepath}")
-        print(f"{'='*70}")
+원본 코드:
+```csharp
+{code}
+```
 
-        # 파일 정보 수집
-        file_content = self.get_file_content(filepath)
-        git_diff = self.get_git_diff(filepath)
-
-        # 1. Planner
-        plan = self.run_planner(file_content, git_diff, filepath)
-        if not plan:
-            print("[오류] Planner 실패 → 중단")
-            return None
-
-        # 2. Reviewer
-        review = self.run_reviewer(file_content, git_diff, plan, filepath)
-        if not review:
-            print("[오류] Reviewer 실패 → 중단")
-            return None
-
-        # 3. Coder
-        result = self.run_coder(file_content, plan, review, filepath)
-        if not result:
-            print("[오류] Coder 실패 → 중단")
-            return None
-
-        # 결과 저장
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = Path(filepath).stem
-        output_file = self.output_dir / f"{timestamp}_{filename}_review.md"
-
-        report = f"""# 코드 리뷰 보고서 — {filename}
-
-**파일**: `{filepath}`
-**생성 시간**: {datetime.now().isoformat()}
-
----
-
-## Planner 분석 및 계획
-
+Planner 최종 계획:
 {plan}
 
+이전 구현:
+```csharp
+{rework_feedback['previous_code']}
+```
+
+사용자 피드백:
+
+문제 항목:
+{rework_feedback['problems']}
+
+개선 방향:
+{rework_feedback['improvements']}
+
+추가 피드백:
+{rework_feedback.get('extra', '없음')}
+
 ---
 
-## Reviewer 검토 결과
+사용자의 피드백을 100% 반영하여 코드를 재구현해주세요.
 
-{review}
+출력 형식:
+## 재작업된 코드
 
----
+```csharp
+[재구현된 전체 코드]
+```
 
-## Coder 리팩터링 결과
+## 변경 사항 (재작업)
 
-{result}
-"""
+### [항목명] 수정 사항
+- 문제점: {{사용자 지적}}
+- 변경 내용: {{어떻게 개선했는가}}
+- 라인: {{변경된 라인 범위}}
 
-        self.write_atomic(str(output_file), report)
-        print(f"\n[저장됨] {output_file}")
-        return str(output_file)
+...
 
-    def run(self, target_file: str = None, review_all: bool = False):
-        """전체 실행"""
-        if target_file:
-            self.review_file(target_file)
-        elif review_all:
-            changed = self.get_changed_cs_files()
-            if not changed:
-                print("[안내] 변경된 C# 파일이 없습니다.")
-                return
-            print(f"\n[안내] 변경된 파일 {len(changed)}개 발견:")
-            for f in changed:
-                print(f"  - {f}")
-            for f in changed:
-                self.review_file(f)
+## 반영된 피드백
+- {{피드백 1}}: {{어떻게 반영했는가}}
+- {{피드백 2}}: {{어떻게 반영했는가}}"""
+
+        return self.call_agent("coder", user_message)
+
+    def show_ua2(
+        self,
+        filepath: str,
+        code: str,
+        coder_output: str
+    ) -> dict:
+        """Stage 5: User Approval 2 — 변경된 코드 최종 검토 + 재작업 로직"""
+
+        print("\n" + "="*70)
+        print("변경된 코드 확인 (User Approval 2)")
+        print("="*70)
+        print(f"\n파일: {filepath}\n")
+        print(f"Coder 구현:\n{coder_output}")
+        print("\n" + "="*70)
+
+        # auto_approve 모드면 자동 승인
+        if self.auto_approve:
+            choice = "승인"
+            print("[자동 모드] 구현 승인")
         else:
-            print("사용법:")
-            print("  python cs_code_reviewer.py --target Assets/Scripts/Systems/MoveSystem.cs")
-            print("  python cs_code_reviewer.py --all")
+            try:
+                choice = sys.stdin.readline().strip()
+                if not choice:
+                    choice = "승인"
+            except EOFError:
+                choice = "승인"
+
+        if choice == "거부":
+            try:
+                sub_choice = sys.stdin.readline().strip()
+                if not sub_choice:
+                    sub_choice = "폐기"
+            except EOFError:
+                sub_choice = "폐기"
+
+            print("="*70 + "\n")
+
+            if sub_choice == "재작업":
+                print("문제점 상세 입력\n")
+                try:
+                    problems = sys.stdin.readline().strip()
+                    improvements = sys.stdin.readline().strip()
+                    extra = sys.stdin.readline().strip()
+                except EOFError:
+                    problems = ""
+                    improvements = ""
+                    extra = ""
+
+                # Coder 출력에서 코드 추출
+                previous_code = code
+                if "```csharp" in coder_output:
+                    try:
+                        previous_code = coder_output.split("```csharp")[1].split("```")[0].strip()
+                    except:
+                        pass
+
+                return {
+                    "choice": "재작업",
+                    "problems": problems,
+                    "improvements": improvements,
+                    "extra": extra,
+                    "previous_code": previous_code
+                }
+            else:
+                return {"choice": "폐기"}
+        else:
+            print("="*70 + "\n")
+            return {"choice": "승인"}
+
+    def apply_to_file(
+        self,
+        filepath: str,
+        coder_output: str
+    ):
+        """Stage 6: 파일 적용 — 백업 + 원자적 쓰기 + 보고서 생성"""
+
+        path = Path(filepath)
+
+        # 리팩터링 코드 추출
+        refactored_code = coder_output
+        if "```csharp" in coder_output:
+            try:
+                refactored_code = coder_output.split("```csharp")[1].split("```")[0].strip()
+            except:
+                pass
+
+        # 1. 백업
+        backup_path = path.with_suffix('.backup.cs')
+        shutil.copy2(str(path), str(backup_path))
+
+        # 2. 원자적 쓰기
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(refactored_code)
+        os.replace(tmp_path, path)
+
+        # 3. 보고서 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = self.output_dir / f"{timestamp}_{path.stem}_review.md"
+        report_content = f"""# 리팩터링 완료 보고서
+
+## 파일
+{filepath}
+
+## 메타데이터
+- 완료 시간: {datetime.now().isoformat()}
+- 백업: {backup_path}
+
+## 변경 사항
+{coder_output}
+"""
+        with open(str(report_path), 'w', encoding='utf-8') as f:
+            f.write(report_content)
+
+        print("\n" + "="*70)
+        print("[OK] 리팩터링 완료")
+        print(f"   파일: {filepath}")
+        print(f"   백업: {backup_path}")
+        print(f"   보고서: {report_path}")
+        print("="*70 + "\n")
+
+    def review_file(self, filepath: str):
+        """전체 6단계 파이프라인 실행"""
+
+        print("\n" + "="*70)
+        print("[C# CODE REVIEWER] 파이프라인 시작")
+        print("="*70)
+        print(f"\n대상 파일: {filepath}\n")
+
+        # 파일 읽기
+        path = Path(filepath)
+        if not path.exists():
+            print(f"[FAIL] 파일을 찾을 수 없음: {filepath}")
+            return
+
+        code = path.read_text(encoding='utf-8')
+
+        # Git diff 읽기
+        try:
+            result = subprocess.run(
+                ["git", "diff", "HEAD", filepath],
+                capture_output=True,
+                text=True,
+                cwd=str(self.project_root)
+            )
+            diff = result.stdout if result.returncode == 0 else ""
+        except:
+            diff = ""
+
+        # ========== Stage 1 & 2: Planner → Reviewer 루프 ==========
+        planner_attempts = 0
+        max_attempts = 3
+        plan = None
+        review = None
+
+        while planner_attempts < max_attempts:
+            planner_attempts += 1
+            print(f"\n[Attempt {planner_attempts}/{max_attempts}]")
+
+            plan = self.run_planner(filepath, code, diff)
+            if not plan:
+                print("[FAIL] Planner 실패")
+                return
+
+            review = self.run_reviewer(filepath, code, plan)
+            if not review:
+                print("[FAIL] Reviewer 실패")
+                return
+
+            # APPROVED 여부 판정
+            is_approved = "APPROVED" in review.upper()
+
+            if is_approved:
+                print("[OK] Reviewer 승인")
+                break
+            else:
+                print("[WARN] Reviewer: 재작업 필요")
+                if planner_attempts < max_attempts:
+                    print("   → Planner 재실행 중...\n")
+
+        if planner_attempts >= max_attempts:
+            print(f"[FAIL] {max_attempts}회 시도 후에도 승인 실패")
+            return
+
+        # ========== Stage 3: User Approval 1 ==========
+        ua1_choice = self.show_ua1(filepath, plan, review)
+        if ua1_choice == "거부":
+            print("[FAIL] User Approval 1: 거부됨 - 파이프라인 중단")
+            return
+
+        # ========== Stage 4 & 5: Coder → User Approval 2 루프 ==========
+        rework_feedback = None
+        coder_iteration = 0
+
+        while True:
+            coder_iteration += 1
+            print(f"\n[Coder Iteration {coder_iteration}]")
+
+            coder_output = self.run_coder(
+                filepath,
+                code,
+                plan,
+                review,
+                rework_feedback
+            )
+            if not coder_output:
+                print("[FAIL] Coder 실패")
+                return
+
+            ua2_result = self.show_ua2(filepath, code, coder_output)
+
+            if ua2_result["choice"] == "승인":
+                print("[OK] User Approval 2: 승인됨")
+                # ========== Stage 6: 파일 적용 ==========
+                self.apply_to_file(filepath, coder_output)
+                break
+            elif ua2_result["choice"] == "폐기":
+                print("[FAIL] User Approval 2: 거부됨 (폐기) - 파이프라인 중단")
+                break
+            else:  # 재작업
+                print("[WARN] User Approval 2: 재작업 요청")
+                rework_feedback = {
+                    "problems": ua2_result["problems"],
+                    "improvements": ua2_result["improvements"],
+                    "extra": ua2_result.get("extra", ""),
+                    "previous_code": ua2_result.get("previous_code", code)
+                }
+                print("   → Coder 재구현 중...\n")
+
+        print("\n" + "="*70)
+        print("[C# CODE REVIEWER] 파이프라인 완료")
+        print("="*70 + "\n")
 
 
 def main():
-    target_file = None
-    review_all = False
+    """메인 엔트리 포인트"""
 
-    if "--target" in sys.argv:
-        idx = sys.argv.index("--target")
-        if idx + 1 < len(sys.argv):
-            target_file = sys.argv[idx + 1]
-    elif "--all" in sys.argv:
-        review_all = True
+    parser = argparse.ArgumentParser(
+        description="C# Code Reviewer & Refactoring Tool"
+    )
+    parser.add_argument(
+        "--target",
+        type=str,
+        help="리뷰 대상 C# 파일 경로 (예: Assets/Scripts/Systems/MoveSystem.cs)"
+    )
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="User Approval 1 & 2 자동 승인 (테스트 모드)"
+    )
+
+    args = parser.parse_args()
 
     project_root = Path(__file__).parent.parent
-    reviewer = CsCodeReviewer(str(project_root))
-    reviewer.run(target_file=target_file, review_all=review_all)
+    reviewer = CsCodeReviewer(str(project_root), auto_approve=args.auto_approve)
+
+    if args.target:
+        reviewer.review_file(args.target)
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
