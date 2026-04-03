@@ -113,210 +113,6 @@ public class SpeedAuthoring : MonoBehaviour
 - 사용자가 직접 `rm -rf`를 실행하거나, "진행하세요"라고 명시 지시해야만 실행 가능
 - 이유: 파일 삭제는 되돌릴 수 없는 작업이므로, 사용자의 최종 판단 필수
 
-## 부모/서브 에이전트 아키텍처 (Multi-Agent Orchestration)
-
-### 개념
-
-**부모 에이전트 (Parent Agent)**
-- 스크립트(`claude_tools/cs_code_reviewer.py` 등)가 직접 제어하는 orchestrator
-- 서브 에이전트들의 실행 순서 결정
-- 에이전트 간 context 수집 및 전달
-- 사용자 상호작용 관리 (User Approval)
-
-**서브 에이전트 (Sub-Agent)**
-- `.claude/agents/` 에 정의된 개별 에이전트
-- 특정 task를 독립적으로 수행
-- 부모 에이전트로부터 context를 받아 작업
-- 결과물을 부모 에이전트로 반환
-
-### 예시: C# Code Reviewer Pipeline
-
-```
-부모 에이전트 (cs_code_reviewer.py)
-    ├─ 파일 읽기 + git diff 생성
-    ├─ Planner (서브 에이전트 호출)
-    │  └─ .claude/agents/planner.md
-    │     입력: 코드 + diff
-    │     출력: 리팩터링 계획 (plan_v1)
-    │
-    ├─ [재작업 루프] Reviewer가 8점 미만이면 반복
-    │  ├─ Reviewer (서브 에이전트 호출)
-    │  │  └─ .claude/agents/reviewer.md
-    │  │     입력: 코드 + plan
-    │  │     출력: 평가 점수 + 피드백
-    │  │
-    │  └─ Planner 재실행 (피드백 포함)
-    │
-    ├─ User Approval 1 (사용자 선택)
-    │  └─ 터미널 input()으로 승인/거부 수집
-    │
-    ├─ Coder (서브 에이전트 호출)
-    │  └─ .claude/agents/coder.md
-    │     입력: 코드 + plan + reviewer_feedback
-    │     출력: 리팩터링된 코드
-    │
-    ├─ [무제한 재작업 루프]
-    │  ├─ User Approval 2 (사용자 선택)
-    │  │  └─ 승인 / 거부(폐기) / 거부(재작업)
-    │  │
-    │  └─ 재작업 시: Coder 다시 호출 (사용자 피드백 포함)
-    │
-    └─ 파일 적용 (백업 + 원자적 쓰기)
-```
-
-### 에이전트 간 Context 전달 방식
-
-#### 방식 1: 프롬프트 임베딩 (권장)
-각 서브 에이전트 호출 시, 이전 단계의 output을 프롬프트에 직접 포함:
-
-```python
-# Planner 실행
-plan_output = call_agent(
-    agent_name="planner",
-    user_input=f"""파일: {filepath}
-원본 코드:
-```csharp
-{code}
-```"""
-)
-
-# Reviewer 실행 (Planner output 포함)
-review_output = call_agent(
-    agent_name="reviewer",
-    user_input=f"""파일: {filepath}
-원본 코드:
-```csharp
-{code}
-```
-
-Planner 계획:
-{plan_output}"""
-)
-
-# Coder 실행 (Plan + Review output 포함)
-coder_output = call_agent(
-    agent_name="coder",
-    user_input=f"""파일: {filepath}
-원본 코드:
-```csharp
-{code}
-```
-
-Planner 계획:
-{plan_output}
-
-Reviewer 피드백:
-{review_output}"""
-)
-```
-
-**장점:**
-- 에이전트가 전체 context를 명확히 이해
-- 파일 시스템 의존성 없음
-- 디버깅 용이
-
-#### 방식 2: 파일 기반 (선택사항)
-각 단계의 output을 별도 파일에 저장하고 참조:
-
-```python
-# 파일에 저장
-def save_context(stage: str, output: str):
-    path = Path(f".review_context/{stage}.md")
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(output, encoding='utf-8')
-
-# 파일에서 로드
-def load_context(stage: str) -> str:
-    return Path(f".review_context/{stage}.md").read_text(encoding='utf-8')
-
-# 사용
-save_context("plan", plan_output)
-review_output = call_agent(
-    agent_name="reviewer",
-    user_input=f"파일: {filepath}\n이전 Planner 결과: [파일 참조: .review_context/plan.md]"
-)
-```
-
-**장점:**
-- 큰 context를 프롬프트에 완전히 포함할 필요 없음
-- 각 단계 output을 기록/추적 가능
-
-### User Approval 구현
-
-User Approval은 agent가 아니라 **사용자 상호작용 프로세스**:
-
-```python
-def show_user_approval_1(plan: str, review: str) -> str:
-    """변경 예정사항 표시 + 사용자 선택"""
-    print(f"""
-변경 예정사항 요약:
-{plan}
-
-Reviewer 점수: {review}
-
-진행하시겠습니까?
-""")
-    choice = input("선택 (승인/거부): ").strip()
-    return choice
-
-def show_user_approval_2(original: str, refactored: str) -> dict:
-    """변경된 코드 표시 + 사용자 선택 (3가지)"""
-    print(f"""
-변경 전:
-{original}
-
-변경 후:
-{refactored}
-""")
-    choice = input("선택 (승인/거부): ").strip()
-    
-    if choice == "거부":
-        sub_choice = input("사유 (폐기/재작업): ").strip()
-        if sub_choice == "재작업":
-            problems = input("문제점: ").strip()
-            improvements = input("개선방향: ").strip()
-            return {
-                "choice": "재작업",
-                "feedback": {"problems": problems, "improvements": improvements}
-            }
-    
-    return {"choice": choice}
-```
-
-### 정리
-
-| 단계 | 타입 | 위치 | 역할 |
-|------|------|------|------|
-| Planner | 서브 에이전트 | `.claude/agents/planner.md` | 코드 분석 + 계획 |
-| Reviewer | 서브 에이전트 | `.claude/agents/reviewer.md` | 계획 평가 |
-| UA1 | 사용자 상호작용 | `.claude/prompts/user_approval_1.md` | 사전 승인 |
-| Coder | 서브 에이전트 | `.claude/agents/coder.md` | 코드 구현 |
-| UA2 | 사용자 상호작용 | `.claude/prompts/user_approval_2.md` | 최종 검토 |
-
-## 토큰 최적화
-
-Claude Code는 제한된 토큰 예산으로 작동합니다. 토큰을 낭비하지 않으려면:
-
-### 응답 효율성
-- 불필요한 설명 제거 — "지금 파일을 읽겠습니다" 같은 보고 제외
-- 코드 변경만 명시 — 변경 전후 비교나 대체 방안 설명 금지 (사용자가 diff 확인 가능)
-- 한 번에 여러 관련 파일 변경 — 개별 변경 여러 번보다 배치 처리
-- 질문이 있으면 최소한의 물음으로 정리 (AskUserQuestion 사용 시 짧은 선택지)
-
-### 도구 사용 최적화
-- Glob, Grep, Read를 리스트 형식으로 배치 실행 (여러 호출을 한 번에)
-- Agent 도구 남용 금지 — Glob/Grep 만으로 가능한 작업은 직접 수행
-- 파일 읽기 전 필요 범위 확정 (limit/offset 활용으로 전체 파일 읽기 피하기)
-
-### 프롬프트 작성
-- 코드 예시는 작은 스니펫만 포함 (전체 파일 X)
-- 반복 설명 금지 — 이전 메시지에서 말한 내용 재설명 X
-- 마크다운 테이블/리스트로 정보 압축 (문단 문장 형식보다 효율)
-
-### 메모리 및 컨텍스트
-- 자동 메모리(`~/.claude/projects/*/memory/`)에 재사용 정보 저장
-- 큰 코드 스니펫이나 출력은 메모리에 링크로만 기록
-
 ---
 
 ## GUI 출력 지양
@@ -364,49 +160,108 @@ Claude Code와 상호작용할 때는 **텍스트 기반 인터페이스**만 �
           pass  # 이미 래핑되었거나 불가능한 경우
   ```
 
-### Anthropic API 직접 사용 (권장)
-- **dependency 설치**: `pip install anthropic`
-- **API 키 설정** (다음 중 하나):
-  1. **환경 변수**: `set ANTHROPIC_API_KEY=sk-ant-...` (Windows)
-  2. **Claude Code 웹/데스크톱**: 자동 인식 (설정 필요 없음)
-  3. **.env 파일**: 프로젝트 루트에 `.env` 생성:
-     ```
-     ANTHROPIC_API_KEY=sk-ant-...
-     ```
-- **기본 패턴**:
-  ```python
-  from anthropic import Anthropic
-  
-  client = Anthropic()  # 자동으로 환경 변수/API 키 로드
-  response = client.messages.create(
-      model="claude-opus-4-6",
-      max_tokens=4096,
-      messages=[
-          {"role": "user", "content": "한글 프롬프트"}
-      ]
-  )
-  
-  result = response.content[0].text
-  ```
-- **장점**: subprocess 불필요, 더 빠르고 직접적, 한글 완벽 지원, 의존성 최소화
+### subprocess에서 Claude CLI 호출 시 (권장)
 
-### subprocess에서 Claude CLI 호출 시
-- **shell=True 사용**: Windows에서 claude 명령어를 PATH에서 찾으려면 cmd.exe 경유 필요
-- **git-bash 경로 설정 필수**: Claude CLI가 내부적으로 bash를 요구함
-  ```python
-  env = os.environ.copy()
-  env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
-  result = subprocess.run(
-      ["claude", "-p", prompt, ...],
-      env=env,
-      shell=True,
-      encoding='utf-8',
-      errors='replace',
-      timeout=300
-  )
-  ```
-- **git-bash 위치**: `D:\Git\bin\bash.exe`
-- **타임아웃**: 장시간 작업 시 `timeout=300` (초 단위) 지정
+Claude Code CLI를 subprocess로 호출하여 agentic orchestration을 구현합니다. 추가 요금 없이 기존 Claude Code 환경을 활용합니다.
+
+#### 권장 패턴: stdin + 환경변수
+
+```python
+import subprocess
+import os
+
+def call_agent(agent_name: str, prompt: str, timeout: int = 600) -> str:
+    """Claude CLI를 stdin으로 호출 (복잡한 프롬프트 안정적 전달)"""
+    cmd = [
+        "claude",
+        "-p",              # 비인터랙티브 모드 (stdout으로 출력)
+        "--model", "claude-haiku-4-5-20251001"
+    ]
+    
+    env = os.environ.copy()
+    env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\usr\bin\bash.exe"
+    
+    result = subprocess.run(
+        cmd,
+        input=prompt,      # stdin으로 프롬프트 전달 (복잡한 텍스트 안정적)
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        timeout=timeout,
+        cwd="/path/to/project",
+        env=env
+    )
+    
+    if result.returncode != 0:
+        print(f"Error: {result.stderr}")
+        return None
+    
+    return result.stdout
+```
+
+**stdin 방식 장점:**
+- 복잡한 프롬프트(시스템 프롬프트 + 유저 메시지 조합) 안정적 전달
+- 명령줄 파싱 이슈 회피 (따옴표, 이스케이프 문제 최소화)
+- 한글 완벽 지원
+- Windows 호환성 우수
+
+#### Windows 환경 설정
+
+- **git-bash 경로**: `CLAUDE_CODE_GIT_BASH_PATH = r"D:\Git\usr\bin\bash.exe"` (정확한 경로)
+- **인코딩**: 항상 `encoding='utf-8', errors='replace'` 지정
+
+**방식 1: 리스트 형식 (기본, 권장)**
+```python
+env = os.environ.copy()
+env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\usr\bin\bash.exe"
+
+cmd = ["claude", "-p", "--model", "claude-haiku-4-5-20251001"]
+result = subprocess.run(
+    cmd,
+    input=final_prompt,
+    capture_output=True,
+    text=True,
+    encoding='utf-8',
+    errors='replace',
+    timeout=600,
+    cwd=str(project_root),
+    env=env
+)
+```
+
+**방식 2: shell=True (Windows 호환성 강화)**
+리스트 형식이 작동하지 않으면 이 방식 사용:
+```python
+import shlex
+
+env = os.environ.copy()
+env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\usr\bin\bash.exe"
+
+cmd_str = f'claude -p --model claude-haiku-4-5-20251001'
+result = subprocess.run(
+    cmd_str,
+    input=final_prompt,
+    capture_output=True,
+    text=True,
+    encoding='utf-8',
+    errors='replace',
+    timeout=600,
+    cwd=str(project_root),
+    shell=True,
+    env=env
+)
+```
+
+**첫 실행 테스트:**
+- 방식 1로 시도 후 실패하면 방식 2로 자동 전환
+- 또는 환경변수 `CLAUDE_CLI_SHELL_MODE=true`로 강제 설정 가능
+
+#### 타임아웃 설정 지침
+
+- **분석/평가 작업**: 300초
+- **코드 생성 작업**: 900초 (15분)
+- **복잡한 리팩터링**: 1200초 (20분) 이상 필요 시 조정
 
 ### git 명령어 허용 범위 (claude_tools 한정)
 claude_tools 내 에이전트 및 스크립트는 **읽기 전용 git 명령어만** 허용합니다.

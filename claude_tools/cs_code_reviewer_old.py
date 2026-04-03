@@ -40,11 +40,21 @@ class CsCodeReviewer:
     def call_agent(
         self,
         agent_name: str,
-        user_message: str
+        user_message: str,
+        timeout: int = 600
     ) -> str:
-        """Sub-agent 호출 via Claude CLI (docs/prompts에서 시스템 프롬프트 로드)"""
+        """Sub-agent 호출 via Claude CLI (-p --agent 모드)
 
-        print(f"\n>> {agent_name.upper()} Agent 실행 중...\n")
+        Args:
+            agent_name: 에이전트 이름 (planner/reviewer/coder)
+            user_message: 사용자 메시지
+            timeout: 타임아웃 (초, 기본 600초 = 10분)
+
+        Returns:
+            에이전트 출력 또는 None (실패 시)
+        """
+
+        print(f"\n>> {agent_name.upper()} Agent 실행 중... (timeout: {timeout}초)")
 
         try:
             # docs/prompts/{agent_name}.md에서 시스템 프롬프트 로드
@@ -57,28 +67,22 @@ class CsCodeReviewer:
             # 최종 프롬프트: system prompt + user message
             final_message = f"{system_prompt}\n\n---\n\n{user_message}"
 
-            # Claude CLI 호출 (stdin + Read tool 순차 실행)
-            # 1. stdin으로 프롬프트 전달 (EOF 후 종료)
-            # 2. Claude가 Read tool로 파일 접근
-            cmd_str = (
-                f'claude -p '
-                f'--model claude-haiku-4-5-20251001 '
-                f'--tools Read '
-                f'--add-dir {shlex.quote(str(self.project_root))}'
-            )
+            # Claude CLI 호출 (stdin 방식 + 환경변수)
+            # -p: 비인터랙티브 모드
+            # stdin: 복잡한 프롬프트는 stdin으로 전달 (명령줄 파싱 이슈 회피)
+            cmd = ["claude", "-p", "--model", "claude-haiku-4-5-20251001"]
 
             env = os.environ.copy()
-            env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\bin\bash.exe"
+            env["CLAUDE_CODE_GIT_BASH_PATH"] = r"D:\Git\usr\bin\bash.exe"
 
             result = subprocess.run(
-                cmd_str,
-                input=final_message,  # stdin으로 전달, EOF 자동 발생
+                cmd,
+                input=final_message,  # stdin으로 전달
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=300,
-                shell=True,
+                timeout=timeout,
                 cwd=str(self.project_root),
                 env=env
             )
@@ -88,18 +92,20 @@ class CsCodeReviewer:
             if result.returncode != 0:
                 print(f"[FAIL] {agent_name} Agent 실패 (returncode={result.returncode})")
                 if result.stderr:
-                    print(f"       stderr: {result.stderr[:1000]}")
+                    print(f"       stderr: {result.stderr[:500]}")
                 return None
 
             if not output or len(output.strip()) == 0:
                 print(f"[FAIL] {agent_name} Agent: 빈 출력 반환")
+                if result.stderr:
+                    print(f"       stderr: {result.stderr[:500]}")
                 return None
 
             print(f"[OK] {agent_name} Agent 완료")
             return output
 
         except subprocess.TimeoutExpired:
-            print(f"[TIMEOUT] {agent_name} Agent 타임아웃 (300초)")
+            print(f"[TIMEOUT] {agent_name} Agent 타임아웃 ({timeout}초 초과)")
             return None
         except Exception as e:
             print(f"[ERROR] {agent_name} Agent 오류: {e}")
@@ -124,7 +130,7 @@ class CsCodeReviewer:
 리팩터링 계획을 [P1]/[P2]/[P3] 우선순위로 작성해주세요.
 코드 예시는 금지됩니다. 변경 방향만 설명하세요."""
 
-        return self.call_agent("planner", user_message)
+        return self.call_agent("planner", user_message, timeout=300)
 
     def run_reviewer(
         self,
@@ -155,7 +161,7 @@ Planner의 각 항목을 평가하세요:
 
 각 항목별 점수와 이유를 상세히 제시해주세요."""
 
-        return self.call_agent("reviewer", user_message)
+        return self.call_agent("reviewer", user_message, timeout=300)
 
     def show_ua1(
         self,
@@ -285,7 +291,7 @@ Planner 최종 계획:
 - {{피드백 1}}: {{어떻게 반영했는가}}
 - {{피드백 2}}: {{어떻게 반영했는가}}"""
 
-        return self.call_agent("coder", user_message)
+        return self.call_agent("coder", user_message, timeout=900)  # 15분 (코드 생성 작업)
 
     def show_ua2(
         self,
