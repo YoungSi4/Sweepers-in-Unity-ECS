@@ -2,49 +2,81 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
 
-// 테스트용 ECS 시스템 - 리팩터링 기회가 있는 코드
+/// <summary>
+/// 이동 시스템 — Active 마크를 가진 엔티티의 위치를 Speed 컴포넌트에 따라 업데이트합니다.
+/// 이동 거리가 임계값을 초과하면 부스트 배수를 적용합니다.
+/// Disabled 마크가 있는 엔티티는 제외됩니다.
+/// </summary>
+[BurstCompile]
 public partial struct TestSystem : ISystem
 {
-    // 문제점 1: Burst 컴파일 속성 누락
+    /// <summary>이동 거리가 이 값을 초과하면 부스트 배수가 적용됩니다.</summary>
+    private const float SpeedBoostThreshold = 10.0f;
+
+    /// <summary>부스트 조건 충족 시 이동 거리에 적용되는 배수입니다.</summary>
+    private const float SpeedBoostMultiplier = 2.0f;
+
+    /// <summary>
+    /// SystemState 초기화 — 향후 EntityQuery 캐싱이 필요한 경우 이곳에서 구현됩니다.
+    /// 현재는 SystemAPI.Query를 통한 동적 쿼리로 처리됩니다.
+    /// </summary>
+    [BurstCompile]
+    public void OnCreate(ref SystemState state)
+    {
+        // 초기화 로직 (현재 단계에서는 필요 없음)
+    }
+
+    /// <summary>
+    /// 매 프레임 업데이트 — Active이면서 Disabled가 아닌 엔티티의 Y 위치를 업데이트합니다.
+    /// </summary>
+    [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        float dt = SystemAPI.Time.DeltaTime;
+        float deltaTime = SystemAPI.Time.DeltaTime;
 
-        // 문제점 2: 복잡한 쿼리 로직
         foreach (var (transform, speed) in
             SystemAPI.Query<RefRW<LocalTransform>, RefRO<Speed>>()
                 .WithAll<Active>()
                 .WithNone<Disabled>())
         {
-            // 문제점 3: 변수명이 모호함
-            var val = speed.ValueRO.Value;
-            var x = dt * val;
+            // 속도값을 절댓값으로 처리 (항상 양수 이동 거리 계산)
+            float speedValue = math.abs(speed.ValueRO.Value);
 
-            // 문제점 4: 매직 넘버 사용
-            if (x > 10.0f)
-            {
-                transform.ValueRW.Position.y += x * 2f;
-            }
-            else
-            {
-                transform.ValueRW.Position.y += x;
-            }
+            // 프레임당 이동 거리 계산
+            float distanceThisFrame = speedValue * deltaTime;
+
+            // 부스트 조건 판정 및 최종 이동 거리 계산
+            float finalMovementDistance = (distanceThisFrame > SpeedBoostThreshold)
+                ? distanceThisFrame * SpeedBoostMultiplier
+                : distanceThisFrame;
+
+            // 위치 업데이트
+            transform.ValueRW.Position.y += finalMovementDistance;
         }
     }
 }
 
-// 문제점 5: 네이밍 규칙 위반 (public 필드)
+/// <summary>
+/// 속도 컴포넌트 — 엔티티의 이동 속도를 나타냅니다.
+/// 항상 양수 값을 가지며, 절댓값으로 처리됩니다.
+/// </summary>
 public struct Speed : IComponentData
 {
+    /// <summary>매 초 단위로 이동할 거리입니다. 항상 양수 값으로 설정하세요.</summary>
     public float Value;
 }
 
-// 문제점 6: 문서화 부재
+/// <summary>
+/// Active 마커 컴포넌트 — 이 마크를 가진 엔티티는 이동 시스템의 영향을 받습니다.
+/// </summary>
 public struct Active : IComponentData
 {
 }
 
-// 문제점 7: 불필요한 MonoBehaviour 혼용 가능성
+/// <summary>
+/// Disabled 마커 컴포넌트 — 이 마크를 가진 엔티티는 이동 시스템에서 제외됩니다.
+/// Active와 독립적으로 사용되며, Disabled가 우선합니다 (WithNone 필터).
+/// </summary>
 public struct Disabled : IComponentData
 {
 }

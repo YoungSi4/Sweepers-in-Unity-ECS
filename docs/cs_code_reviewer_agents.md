@@ -74,18 +74,22 @@
 - 예외 가능성 처리
 
 ### 입력 형식
+
+**파일 경로만 전달 (토큰 절약, 에이전트가 Read로 읽음):**
+
 ```
-파일 경로: {filepath}
-원본 코드:
-```csharp
-{file_content}
+대상 파일: {filepath}
+
+위 파일을 Read 도구로 읽어 8가지 기준으로 분석하고 리팩터링 계획을 수립하세요.
+
+[선택사항] Git 변경사항:
+{git_diff 또는 파일 경로}
 ```
 
-Git 변경사항:
-```diff
-{git_diff}
-```
-```
+**Orchestrator가 처리:**
+1. 원본 코드 파일 경로 제공
+2. git diff가 크면 → `claude_tools/.tmp/{timestamp}_git_diff.txt` 저장 후 경로 전달
+3. 위 경로들을 user_prompt로 전달
 
 ### 출력 형식
 ```markdown
@@ -119,7 +123,7 @@ Git 변경사항:
 ```
 
 ### System Prompt
-→ 별도 파일: `prompts/planner_system.md`
+→ 별도 파일: `.claude/agents/planner.md`
 
 ---
 
@@ -165,16 +169,20 @@ Git 변경사항:
 - 1-4: NEEDS_REVISION
 
 ### 입력 형식
+
+**파일 경로만 전달 (토큰 절약, 에이전트가 Read로 읽음):**
+
 ```
-파일 경로: {filepath}
-원본 코드:
-```csharp
-{file_content}
+대상 파일: {filepath}
+Planner 계획 파일: {tmp_path_to_plan}
+
+위 두 파일을 Read 도구로 읽어 완성도(1-10)와 실현가능성(1-10)을 평가하세요.
 ```
 
-Planner 계획:
-{plan}
-```
+**Orchestrator가 처리:**
+1. 원본 코드 파일 경로 제공
+2. Planner 계획 → `claude_tools/.tmp/{timestamp}_planner.md` 저장
+3. 위 경로들을 user_prompt로 전달
 
 ### 출력 형식
 ```markdown
@@ -212,7 +220,7 @@ Planner에게 지시:
 ```
 
 ### System Prompt
-→ 별도 파일: `prompts/reviewer_system.md`
+→ 별도 파일: `.claude/agents/reviewer.md`
 
 ### 재시도 정책
 
@@ -221,12 +229,9 @@ Planner에게 지시:
 2. **2-3회**: 8점 미만 시 Planner 재작업 후 재평가
 3. **3회 후에도 8점 미만**: 파이프라인 중단 → 사용자에게 재작업 요청
 
-현재 평가 회차를 명시하고, 3회차에 NEEDS_REVISION인 경우 "최대 재시도 횟수 도달" 명시
-
-### 중요: 재작업 코드 평가
-Reviewer는 **Coder의 재작업 코드도 평가**할 수 있어야 합니다.
-- User Approval 2에서 거부 후 Coder가 재구현한 코드도 같은 기준으로 평가
-- System Prompt에 명시: "User Approval 2 거부 후 재작업 코드도 평가 가능"
+**중요: 현재 평가 회차를 명시해야 합니다**
+- 출력에 반드시 "첫 번째 평가", "두 번째 재평가 (재시도 2/3)", "세 번째 재평가 (재시도 3/3)" 중 하나 명시
+- 3회차에 NEEDS_REVISION인 경우 "최대 재시도 횟수 도달" 명시
 
 ---
 
@@ -240,9 +245,8 @@ Reviewer는 **Coder의 재작업 코드도 평가**할 수 있어야 합니다.
 ### 책임
 1. Planner 계획 100% 구현
 2. Reviewer 피드백 반영
-3. (재작업 시) 사용자 피드백 반영하여 재구현
-4. 리팩터링된 완전한 코드 작성
-5. 변경 사항 명확히 문서화
+3. 리팩터링된 완전한 코드 작성
+4. 변경 사항 명확히 문서화
 
 ### 제약 (절대 금지)
 - ⛔ 계획 수정 또는 새로운 전략 수립
@@ -250,44 +254,25 @@ Reviewer는 **Coder의 재작업 코드도 평가**할 수 있어야 합니다.
 - ⛔ 분석 또는 판정 수행
 - ⛔ git 명령어 사용
 
-### 입력 형식 (초기 구현)
+### 입력 형식
+
+**파일 경로만 전달 (토큰 절약, 에이전트가 Read로 읽음):**
+
 ```
-파일 경로: {filepath}
+대상 파일: {filepath}
+Planner 계획 파일: {tmp_path_to_plan}
+Reviewer 피드백 파일: {tmp_path_to_review}
 
-원본 코드:
-```csharp
-{file_content}
-```
-
-Planner 최종 계획:
-{plan}
-
-Reviewer 피드백:
-{review}
+위 파일들을 Read 도구로 읽고 계획과 피드백을 반영하여 C# 리팩터링 코드를 작성하세요.
 ```
 
-### 입력 형식 (재작업)
-```
-파일 경로: {filepath}
+**Orchestrator가 처리:**
+1. 원본 코드 파일 경로 제공
+2. Planner 계획 → `claude_tools/.tmp/{timestamp}_planner.md` 저장
+3. Reviewer 피드백 → `claude_tools/.tmp/{timestamp}_reviewer.md` 저장
+4. 위 경로들을 user_prompt로 전달
 
-원본 코드:
-```csharp
-{file_content}
-```
-
-Planner 최종 계획:
-{plan}
-
-이전 구현:
-```csharp
-{previous_implementation}
-```
-
-사용자 피드백:
-{user_feedback}
-```
-
-### 출력 형식 (초기 구현) — 반드시 정확히 따를 것
+### 출력 형식 — 반드시 정확히 따를 것
 
 ```markdown
 ## 리팩터링된 코드
@@ -318,49 +303,8 @@ Planner 최종 계획:
 
 이 형식이 지켜지지 않으면 부모 에이전트의 코드 추출이 실패합니다.
 
-### 출력 형식 (재작업) — 반드시 정확히 따를 것
-
-```markdown
-## 재작업된 코드
-
-```csharp
-[재구현된 전체 파일 코드 - using 문과 namespace 포함]
-```
-
-## 변경 사항 (재작업)
-
-### [항목명] 수정 사항
-- 문제점: {사용자가 지적한 구체적 문제}
-- 개선 내용: {어떻게 고쳤는가}
-- 라인: {수정된 라인 범위}
-
-...
-
-## 반영된 피드백 요약
-- 피드백 1: {구체적 반영 방법}
-- 피드백 2: {구체적 반영 방법}
-```
-
-**중요: 재작업 코드 블록 형식**
-- 반드시 "```csharp"로 정확히 시작 (공백, 약자 금지)
-- 코드 내부: 전체 파일 완전함 (using + namespace 포함)
-- 반드시 "```"로 정확히 종료
-- 다른 코드 블록 추가 금지
-
-이 형식이 지켜지지 않으면 부모 에이전트의 코드 추출이 실패합니다.
-
 ### System Prompt
-→ 별도 파일: `prompts/coder_system.md`
-
-### 중요: 재작업 로직 포함
-Coder System Prompt에 명시:
-```
-"사용자가 User Approval 2에서 재작업을 요청한 경우:
-1. 사용자 피드백 (문제점 + 개선 방향)을 수신
-2. 이전 구현의 문제점을 명확히 파악
-3. 피드백을 반영하여 코드 재구현
-4. 반영된 피드백 목록을 명시하여 보고"
-```
+→ 별도 파일: `.claude/agents/coder.md`
 
 ---
 
@@ -406,17 +350,17 @@ Coder System Prompt에 명시:
 - ❌ 거부: 파이프라인 중단 (변경 미적용)
 ```
 
-### System Prompt
-→ 별도 파일: `prompts/user_approval_1.md`
+### 출력 형식 문서
+→ 별도 파일: `.claude/prompts/user_approval_1.md`
 
 ---
 
-## 5. USER APPROVAL 2 (변경된 코드 확인 + 재작업 로직)
+## 5. USER APPROVAL 2 (변경된 코드 최종 확인)
 
 ### 역할
 - Coder 구현 후 변경된 코드를 사용자에게 제시
 - 변경 전/후 비교를 통해 명확한 검토 제공
-- 최종 승인 또는 거부/재작업 결정
+- 최종 승인 또는 거부 결정
 
 ### 입력
 - 원본 C# 코드
@@ -459,40 +403,12 @@ Coder System Prompt에 명시:
 - 미적용 항목: {있으면 명시}
 
 ### 사용자 판정
-- ✅ 승인: 실제 파일에 변경사항 적용
-- ❌ 거부 (폐기): 변경사항 버림, 파이프라인 종료
-- ⚠️ 거부 (재작업): 피드백 입력 후 Coder 재구현
+- ✅ 승인: 실제 파일에 변경사항 적용 (파일 적용 진행)
+- ❌ 거부: 변경사항 버림, 파이프라인 중단
 ```
 
-### 거부 시 상세 프로세스 (재작업)
-
-❌ **거부** 선택 → **재작업** 선택 시:
-
-```markdown
-## 문제점 상세 입력
-
-### 문제가 있는 항목 (필수)
-1. [P1] 항목명: {어떤 부분이 문제인가?}
-2. [P2] 항목명: {어떤 부분이 문제인가?}
-
-### 개선 방향 (필수)
-1. [P1]: {어떻게 개선되어야 하는가?}
-2. [P2]: {어떻게 개선되어야 하는가?}
-
-### 추가 피드백 (선택)
-- {추가 피드백}
-
-[재작업 제출] 버튼 클릭
-```
-
-**자동 진행**:
-- 사용자 피드백 + 원본 코드 + Planner 계획을 함께 Coder에게 전달
-- Coder가 피드백을 반영하여 재구현
-- 재구현된 코드로 User Approval 2 다시 진행
-- 반복 가능 (무제한)
-
-### System Prompt
-→ 별도 파일: `prompts/user_approval_2.md`
+### 출력 형식 문서
+→ 별도 파일: `.claude/prompts/user_approval_2.md`
 
 ---
 
@@ -534,12 +450,12 @@ User Approval 2 승인 후 자동으로 진행:
 
 ---
 
-## 4. USER APPROVAL (UA)
+## 6. USER APPROVAL 입력 모드 (공통)
 
 User Approval은 에이전트가 아니라 **사용자 상호작용 프로세스**입니다.
 Orchestrator가 직접 관리하며, 실행 환경에 따라 입력 모드를 자동으로 감지합니다.
 
-### UA 입력 모드
+### UA 입력 모드 감지
 
 #### 모드 1: 대화형 (interactive)
 
@@ -554,11 +470,6 @@ if choice not in ["승인", "거부"]:
     choice = "거부"  # 무효 입력 시 기본값
 ```
 
-**사용 시나리오:**
-- 개발 중 수동 리뷰
-- 사용자의 즉시 피드백이 필요한 경우
-- 예: `python cs_code_reviewer.py --target file.cs`
-
 #### 모드 2: 자동 승인 (auto_approve)
 
 **감지 조건:**
@@ -567,42 +478,21 @@ if choice not in ["승인", "거부"]:
 **동작:**
 ```python
 choice = "승인"  # 모든 UA에서 자동 승인
-print("[자동 모드] User Approval: 승인")
 ```
-
-**사용 시나리오:**
-- 신뢰할 수 있는 코드 배치 처리
-- 테스트 자동화
-- 반복적인 리팩터링
-- 예: `python cs_code_reviewer.py --target file.cs --auto-approve`
 
 #### 모드 3: 비대화형 (non_interactive) — 안전 모드
 
 **감지 조건:**
 - `--auto-approve` 플래그 없음
 - `sys.stdin.isatty()` == False (stdin 없음)
-- 파이프, 리다이렉트, CI/CD 환경
 
 **동작:**
 ```python
-# stdin이 없으므로 input() 호출 불가
-# 대신 안전한 기본값 사용
-
-if approval_stage == "UA1":
-    print("[경고] stdin 없음 (비대화형 모드) - 기본값: 거부")
-    choice = "거부"  # 보수적 기본값
-elif approval_stage == "UA2":
-    print("[경고] stdin 없음 (비대화형 모드) - 기본값: 거부")
-    choice = "거부"  # 보수적 기본값
+# 보수적 기본값 사용
+choice = "거부"
 ```
 
-**사용 시나리오:**
-- CI/CD 파이프라인 (자동 검증)
-- 백그라운드 배치 작업
-- 서버 자동화
-- 예: `python cs_code_reviewer.py --target file.cs < /dev/null`
-
-### UA 입력 감지 로직
+### 입력 감지 로직 (공통)
 
 ```python
 import sys
@@ -622,98 +512,16 @@ class UAInputModeManager:
             return "non_interactive"
     
     def get_approval(self, stage: str) -> str:
-        """
-        사용자 승인 획득
-        
-        Args:
-            stage: "UA1" 또는 "UA2"
-        
-        Returns:
-            "승인" 또는 "거부"
-        """
+        """사용자 승인 획득 (stage: "UA1" 또는 "UA2")"""
         if self.mode == "auto_approve":
             return "승인"
         elif self.mode == "interactive":
-            return self._interactive_input(stage)
-        else:  # non_interactive
-            return self._non_interactive_default(stage)
-    
-    def _interactive_input(self, stage: str) -> str:
-        """대화형 입력"""
-        try:
             choice = input(f"[{stage}] 선택 (승인/거부): ").strip()
             return "승인" if choice == "승인" else "거부"
-        except EOFError:
-            # stdin 갑자기 끊김
-            print(f"[경고] stdin 끊김 - 기본값 사용")
+        else:  # non_interactive
+            print(f"[경고] stdin 없음 (비대화형 모드) - 기본값: 거부")
             return "거부"
-    
-    def _non_interactive_default(self, stage: str) -> str:
-        """비대화형 기본값 (안전)"""
-        print(f"[경고] stdin 없음 (비대화형 모드) - 기본값: 거부")
-        return "거부"
-```
-
-### UA 출력 형식
-
-#### UA1 (변경 예정사항 확인)
-
-```
-================================================================================
-변경 예정 사항 (User Approval 1)
-================================================================================
-
-파일: Assets/Scripts/Systems/MoveSystem.cs
-
-Planner 계획:
-## 코드 품질 분석
-...
-
-Reviewer 평가:
-## 평가 결과
-평균 점수: X/10
-
-================================================================================
-[{mode}] 승인/거부를 입력하세요.
-```
-
-#### UA2 (변경된 코드 최종 확인)
-
-```
-================================================================================
-변경된 코드 확인 (User Approval 2)
-================================================================================
-
-파일: Assets/Scripts/Systems/MoveSystem.cs
-
-변경 전:
-```csharp
-[원본 코드]
-```
-
-변경 후:
-```csharp
-[리팩터링된 코드]
-```
-
-Coder 변경 사항 요약:
-...
-
-================================================================================
-[{mode}] 승인/거부/재작업을 입력하세요.
-
-거부 선택 시:
-폐기 - 변경사항 버림, 파이프라인 중단
-재작업 - 문제점 + 개선 방향 입력 후 Coder 재구현
 ```
 
 ---
 
-## 다음 단계
-
-System Prompt를 별도 파일로 생성:
-- `prompts/planner_system.md`
-- `prompts/reviewer_system.md`
-- `prompts/coder_system.md`
-- `prompts/user_approval_1.md`
-- `prompts/user_approval_2.md`

@@ -26,12 +26,9 @@ Assets/Scripts 경로의 C# 스크립트를 자동으로 리뷰하고 리팩터�
     ↓
 [5. User Approval 2] 변경된 코드 사용자 확인 & 최종 승인 ← ⭐ 사용자 개입
     │
-    ├─→ (✅ 승인) → [6. 파일 적용] (백업 + 기록)
-    ├─→ (❌ 폐기) → [종료]
-    └─→ (⚠️ 재작업) → 피드백 입력 → [4. Coder] 재구현 ┐
-        (문제점 + 개선 방향)                          ↑
-                                                     └─ (반복)
-    ↓ (✅ 승인)
+    ├─→ (✅ 승인) → [6. 파일 적용]
+    └─→ (❌ 거부) → 폐기 또는 중단 → [종료]
+    ↓
 [6. 파일 적용] 원본 파일 백업, 새 코드 기록, 보고서 생성
     ↓
 [완료]
@@ -54,10 +51,9 @@ Assets/Scripts 경로의 C# 스크립트를 자동으로 리뷰하고 리팩터�
   - 2-3회: 8점 미만 시 Planner 재작업 후 재평가
   - 3회 후 여전히 8점 미만 → 파이프라인 중단, 사용자에게 재작업 요청
 
-### ✅ 재작업 피드백 루프
+### ✅ 사용자 거부 처리
 User Approval 2에서 거부 시:
-- **폐기**: 변경사항 버림
-- **재작업**: 문제점 + 개선 방향 입력 → Coder 재구현 → User Approval 2 (반복)
+- **폐기**: 변경사항 버림, 파이프라인 중단
 
 ### ✅ 아키텍처 유연성
 - **ECS (ISystem)**: 엄격한 기준 (Managed 타입 금지)
@@ -73,7 +69,7 @@ User Approval 2에서 거부 시:
 | 2. Reviewer | 평가 (1-10) | 코드 + 계획 | 점수 + 피드백 | UA1 (≥8점) / Planner 재작업 (<8점) |
 | 3. UA1 | 사용자 확인 | 계획 요약 | 승인/거부 | Coder (✅) / 중단 (❌) |
 | 4. Coder | 구현 | 계획 + 피드백 | 리팩터링 코드 | UA2 |
-| 5. UA2 | 최종 확인 | 변경 전/후 코드 | 승인/거부/재작업 | 파일적용 (✅) / 폐기 (❌) / Coder 재구현 (⚠️) |
+| 5. UA2 | 최종 확인 | 변경 전/후 코드 | 승인/거부 | 파일적용 (✅) / 중단 (❌) |
 | 6. 파일 적용 | 자동 기록 | 리팩터링 코드 | 백업 + 파일 수정 | 완료 |
 
 ---
@@ -93,40 +89,49 @@ Planner가 분석하는 항목:
 
 ---
 
-## 데이터 흐름
+## 에이전트 호출 방식 (stdin + --system-prompt-file)
+
+**목표: 토큰 절약**
+
+각 subprocess 에이전트는:
+1. stdin으로 **파일 경로만** 받음 (코드 내용 미포함)
+2. `--system-prompt-file`로 System Prompt 로드
+3. Read 도구로 **필요한 파일들을 직접 읽음**
 
 ```
-원본 코드
-  ↓
-Planner: 8가지 기준 분석
-  ├─ 문제점 목록
-  ├─ 리팩터링 항목 (P1/P2/P3)
-  └─ 구현 지시사항 (코드 예시 X)
-  ↓
-Reviewer: 항목별 평가
-  ├─ 완성도 점수
-  ├─ 실현 가능성 점수
-  └─ 평균 점수 (통과/재작업)
-  ↓
-User Approval 1: 변경 예정사항 확인
-  ├─ 변경 항목 요약
-  ├─ 영향도 분석
-  └─ 사용자 승인 여부
-  ↓
-Coder: 코드 구현
-  ├─ 리팩터링된 완전한 코드
-  ├─ 변경 전/후 비교
-  └─ 변경 통계 (라인 수)
-  ↓
-User Approval 2: 최종 확인
-  ├─ 변경 코드 상세 제시
-  ├─ 구현 완성도 평가
-  └─ 사용자 최종 판정 (승인/거부/재작업)
-  ↓ (✅ 승인)
-파일 적용: 자동 기록
-  ├─ 원본 백업 (.backup.cs)
-  ├─ 파일에 새 코드 기록
-  └─ 최종 보고서 생성
+Orchestrator:
+  파일 경로 → stdin
+      ↓
+Claude CLI:
+  - .claude/agents/{agent_name}.md 로드 (--system-prompt-file)
+  - stdin에서 user_prompt 수신
+  - 에이전트 실행
+      ↓
+에이전트 (Read 도구 사용):
+  - 파일 경로에서 원본 코드 읽음
+  - 임시 파일 경로에서 계획/피드백 읽음
+  - 분석/평가/구현 수행
+```
+
+**예시:**
+
+Planner:
+```
+stdin: "대상 파일: Assets/Scripts/TestSystem.cs\n\n위 파일을 Read 도구로 읽어 분석하세요."
+
+에이전트가 Read로:
+  - Assets/Scripts/TestSystem.cs 읽음
+  - 분석 수행
+```
+
+Reviewer:
+```
+stdin: "대상 파일: Assets/Scripts/TestSystem.cs\nPlanner 계획 파일: .tmp/planner.md\n\n위 파일들을 Read로 읽어 평가하세요."
+
+에이전트가 Read로:
+  - Assets/Scripts/TestSystem.cs 읽음
+  - .tmp/planner.md 읽음
+  - 평가 수행
 ```
 
 ---
@@ -365,61 +370,14 @@ Coder 변경 사항 요약:
 변경을 승인하시겠습니까?
 선택 (승인/거부):
 
-거부 선택 시 추가 선택:
-선택 (폐기/재작업):
+거부 선택 시 옵션:
+폐기 - 변경사항 버림, 파이프라인 중단
 ```
 
 ### UA2 사용자 입력
 
-#### 첫 번째 선택: 승인/거부
 - **승인**: 파일 적용 (Stage 6) 진행
-- **거부**: 다음 선택 대기
-
-#### 두 번째 선택 (거부 선택 시): 폐기/재작업
-- **폐기**: 파이프라인 중단, 변경사항 버림
-- **재작업**: 3단계 피드백 입력 → Coder 재구현 → UA2 재검토 (반복)
-
-### UA2 재작업 사용자 피드백 입력 (3단계)
-
-거부 후 "재작업" 선택 시:
-
-```
-문제점을 설명하세요:
-> {사용자 입력 1줄}
-
-개선 방향을 제시하세요:
-> {사용자 입력 1줄}
-
-추가 피드백 (선택사항, 엔터로 스킵):
-> {사용자 입력 1줄 또는 빈 줄}
-```
-
-**입력 처리:**
-```python
-# 1단계: 문제점 입력
-problems = input("문제점을 설명하세요: ").strip()
-if not problems:
-    print("[경고] 문제점을 입력하세요")
-    return  # 재입력 요청
-
-# 2단계: 개선 방향 입력
-improvements = input("개선 방향을 제시하세요: ").strip()
-if not improvements:
-    print("[경고] 개선 방향을 입력하세요")
-    return  # 재입력 요청
-
-# 3단계: 추가 피드백 (선택)
-extra = input("추가 피드백 (선택, 엔터로 스킵): ").strip()
-
-# Coder에게 전달할 피드백 정리
-rework_feedback = {
-    "problems": problems,
-    "improvements": improvements,
-    "extra": extra  # 빈 문자열 가능
-}
-```
-
-**비대화형 모드**: stdin이 없으면 기본값 "거부" (재작업 요청 안 함)
+- **거부 → 폐기**: 파이프라인 중단, 변경사항 버림
 
 ### UA2 입력 모드 (자동 감지)
 
@@ -494,8 +452,8 @@ claude_tools/review_outputs/{timestamp}_{filename}_review.md
 
 - **cs_code_reviewer_architecture.md** (본 문서) - 전체 개요
 - **cs_code_reviewer_agents.md** - 각 에이전트 상세 정의
-- **prompts/planner_system.md** - Planner System Prompt
-- **prompts/reviewer_system.md** - Reviewer System Prompt
-- **prompts/coder_system.md** - Coder System Prompt
-- **prompts/user_approval_1.md** - User Approval 1 프롬프트
-- **prompts/user_approval_2.md** - User Approval 2 프롬프트
+- **.claude/agents/planner.md** - Planner Agent System Prompt
+- **.claude/agents/reviewer.md** - Reviewer Agent System Prompt
+- **.claude/agents/coder.md** - Coder Agent System Prompt
+- **.claude/prompts/user_approval_1.md** - User Approval 1 출력 형식
+- **.claude/prompts/user_approval_2.md** - User Approval 2 출력 형식
