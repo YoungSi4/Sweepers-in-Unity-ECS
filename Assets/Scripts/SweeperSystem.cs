@@ -9,7 +9,7 @@ partial struct SweeperUpdateJob : IJobEntity
 
     void Execute(in Sweeper sweeper, ref LocalTransform xform)
     {
-        var dX = sweeper.Speed * Elapsed;
+        var dX = sweeper.Speed * Elapsed / sweeper.Damping;
         xform.Position.x += dX;
     }
 }
