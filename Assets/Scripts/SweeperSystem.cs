@@ -1,15 +1,17 @@
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
+// using UnityEngine;
 
 [BurstCompile]
 partial struct SweeperUpdateJob : IJobEntity
 {
-    public float Elapsed;
+    public float Deltatime;
 
     void Execute(in Sweeper sweeper, ref LocalTransform xform)
     {
-        var dX = sweeper.Speed * Elapsed / sweeper.Damping;
+        // Time.deltaTime : called from MonoBehaviour.FixedUpdate or WaitForFixedUpdate
+        var dX = sweeper.Speed * Deltatime;
         xform.Position.x += dX;
     }
 }
@@ -21,7 +23,7 @@ public partial struct SweeperSystem : ISystem
     {
         var job = new SweeperUpdateJob()
         {
-            Elapsed = (float)SystemAPI.Time.ElapsedTime
+            Deltatime = (float)SystemAPI.Time.DeltaTime
         };
         job.ScheduleParallel();
     }

@@ -4,19 +4,17 @@ using Unity.Entities;
 public struct Sweeper : IComponentData
 {
     public float Speed;
-    public float Damping;
 }
 
 public class SweeperAuthoring : MonoBehaviour
 {
     public float _speed = 1.0f;
-    public float _damping = 2.0f;
 
     class Baker : Baker<SweeperAuthoring> {
         public override void Bake(SweeperAuthoring authoring)
         {
-            var data = new Sweeper() { Speed = authoring._speed, Damping = authoring._damping };
-            AddComponent(GetEntity(TransformUsageFlags.Dynamic), data);
+            var data = new Sweeper() { Speed = authoring._speed };
+            AddComponent(GetEntity(TransformUsageFlags.None), data);
         }
     }
 }
