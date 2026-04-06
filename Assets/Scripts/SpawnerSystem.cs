@@ -2,6 +2,7 @@ using Unity.Entities;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Transforms;
+using Unity.Mathematics;
 
 // [UpdateInGroup(typeof(InitializationSystemGroup))]
 public partial struct SpawnerUpdateJob: ISystem
@@ -22,10 +23,15 @@ public partial struct SpawnerUpdateJob: ISystem
                 continue;
             spawner.ValueRW.timer = 0f;
 
+            var rand = new Random(spawner.ValueRO.Random_seed);
+
             for (int i = 0; i < spawner.ValueRO.Spawn_count; i++)
             {
-                var instances = ecb.Instantiate(spawner.ValueRO.sweeper);
-                ecb.SetComponent(instances, LocalTransform.FromPosition(xform.ValueRO.Position));
+                var instance = ecb.Instantiate(spawner.ValueRO.sweeper);
+                ecb.SetComponent(instance, LocalTransform.FromPosition(xform.ValueRO.Position));
+
+                // set speed randomly
+                ecb.SetComponent(instance, Sweeper.Random(rand.NextUInt(), spawner.ValueRO.Sweeper_speed));
             }
         }
             

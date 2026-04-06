@@ -10,6 +10,9 @@ public struct Spawner : IComponentData
     public float timer;
     public int Spawn_count;
     public Entity sweeper;
+    public uint Random_seed;
+    public float Sweeper_speed;
+
     //public Pool pool;
 
     //public struct Pool : IComponentData
@@ -25,6 +28,9 @@ public class SpawnerAuthoring : MonoBehaviour
     public GameObject _Prefab = null;
     public int _spawnCount = 1;
     public float _timer = 0f;
+    public uint _randomSeed = 10;
+
+    public float _sweeper_speed = 5f;
 
     class Baker : Baker<SpawnerAuthoring>
     {
@@ -35,7 +41,9 @@ public class SpawnerAuthoring : MonoBehaviour
                 Spawn_delay = authoring._spawnDelay,
                 sweeper = GetEntity(authoring._Prefab, TransformUsageFlags.Dynamic),
                 Spawn_count = authoring._spawnCount,
-                timer = authoring._timer
+                timer = authoring._timer,
+                Random_seed = authoring._randomSeed,
+                Sweeper_speed = authoring._sweeper_speed
             };
             // spawner is invisible but I choose renderable
             AddComponent(GetEntity(TransformUsageFlags.Renderable), data);
