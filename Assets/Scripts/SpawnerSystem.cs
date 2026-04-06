@@ -23,15 +23,13 @@ public partial struct SpawnerUpdateJob: ISystem
                 continue;
             spawner.ValueRW.timer = 0f;
 
-            var rand = new Random(spawner.ValueRO.Random_seed);
-
             for (int i = 0; i < spawner.ValueRO.Spawn_count; i++)
             {
                 var instance = ecb.Instantiate(spawner.ValueRO.sweeper);
-                ecb.SetComponent(instance, LocalTransform.FromPosition(xform.ValueRO.Position));
+                ecb.SetComponent(instance, LocalTransform.FromPositionRotation(xform.ValueRO.Position, spawner.ValueRO.Sweeper_stand));
 
                 // set speed randomly
-                ecb.SetComponent(instance, Sweeper.Random(rand.NextUInt(), spawner.ValueRO.Sweeper_speed));
+                ecb.SetComponent(instance, Sweeper.Random(spawner.ValueRW.Rand.NextUInt(), spawner.ValueRO.Sweeper_speed));
             }
         }
             

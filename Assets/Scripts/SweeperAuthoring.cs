@@ -7,7 +7,7 @@ public struct Sweeper : IComponentData
     public float Speed;
     public static Sweeper Random(uint seed, float speed)
         => new Sweeper() {
-            Speed = new Unity.Mathematics.Random(seed).NextFloat(speed, speed + 1)};
+            Speed = new Unity.Mathematics.Random(seed).NextFloat(speed, speed + 2)};
 }
 
 public class SweeperAuthoring : MonoBehaviour

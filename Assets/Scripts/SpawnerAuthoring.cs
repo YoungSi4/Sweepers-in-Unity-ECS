@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Threading;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.Pool;
 
 public struct Spawner : IComponentData
 {
@@ -10,8 +10,9 @@ public struct Spawner : IComponentData
     public float timer;
     public int Spawn_count;
     public Entity sweeper;
-    public uint Random_seed;
     public float Sweeper_speed;
+    public quaternion Sweeper_stand;
+    public Unity.Mathematics.Random Rand;
 
     //public Pool pool;
 
@@ -42,11 +43,12 @@ public class SpawnerAuthoring : MonoBehaviour
                 sweeper = GetEntity(authoring._Prefab, TransformUsageFlags.Dynamic),
                 Spawn_count = authoring._spawnCount,
                 timer = authoring._timer,
-                Random_seed = authoring._randomSeed,
-                Sweeper_speed = authoring._sweeper_speed
+                Sweeper_speed = authoring._sweeper_speed,
+                Sweeper_stand = quaternion.EulerXYZ(0, math.PI, 0),
+                Rand = new Unity.Mathematics.Random(authoring._randomSeed)
             };
             // spawner is invisible but I choose renderable
-            AddComponent(GetEntity(TransformUsageFlags.Renderable), data);
+            AddComponent(GetEntity(TransformUsageFlags.Dynamic), data);
         } // bake
     } // baker class
 }
