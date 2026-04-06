@@ -127,5 +127,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 67883e7ba6aad234790bd6b529f8c1c9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SweeperAuthoring
-  _speed: 1
-  _damping: 60
+  _speed: 3

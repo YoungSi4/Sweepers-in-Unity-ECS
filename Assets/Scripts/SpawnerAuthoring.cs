@@ -33,11 +33,12 @@ public class SpawnerAuthoring : MonoBehaviour
             var data = new Spawner()
             {
                 Spawn_delay = authoring._spawnDelay,
-                sweeper = GetEntity(authoring._Prefab, TransformUsageFlags.None),
+                sweeper = GetEntity(authoring._Prefab, TransformUsageFlags.Dynamic),
                 Spawn_count = authoring._spawnCount,
                 timer = authoring._timer
             };
-            AddComponent(GetEntity(TransformUsageFlags.None), data);
+            // spawner is invisible but I choose renderable
+            AddComponent(GetEntity(TransformUsageFlags.Renderable), data);
         } // bake
     } // baker class
 }

@@ -19,7 +19,7 @@ public partial struct SpawnerUpdateJob: ISystem
             spawner.ValueRW.timer += SystemAPI.Time.DeltaTime;
 
             if (spawner.ValueRO.timer < spawner.ValueRO.Spawn_delay)
-                return;
+                continue;
             spawner.ValueRW.timer = 0f;
 
             for (int i = 0; i < spawner.ValueRO.Spawn_count; i++)

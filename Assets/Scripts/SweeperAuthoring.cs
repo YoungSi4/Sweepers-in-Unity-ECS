@@ -14,7 +14,7 @@ public class SweeperAuthoring : MonoBehaviour
         public override void Bake(SweeperAuthoring authoring)
         {
             var data = new Sweeper() { Speed = authoring._speed };
-            AddComponent(GetEntity(TransformUsageFlags.None), data);
+            AddComponent(GetEntity(TransformUsageFlags.Dynamic), data);
         }
     }
 }
