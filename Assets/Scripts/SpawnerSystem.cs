@@ -32,5 +32,8 @@ public partial struct SpawnerSystem: ISystem
                 ecb.SetComponent(instance, Sweeper.Random(spawner.ValueRW.Rand.NextUInt(), spawner.ValueRO.Sweeper_speed, spawner.ValueRO.Time_to_destroy));
             }
         }
+
+        ecb.Playback(state.EntityManager);
+        ecb.Dispose();
     }
 }
