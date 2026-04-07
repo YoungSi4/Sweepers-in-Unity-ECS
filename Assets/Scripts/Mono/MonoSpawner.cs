@@ -73,9 +73,12 @@ public class MonoSpawner : MonoBehaviour
             return;
         timer = 0f;
 
-        MonoSweeper temp = SweeperPool.EnableObj();
-        temp.enabled = true;
-        temp.Init(transform.position, this);
+        for (int i = 0; i < Spawn_count; i++)
+        {
+            MonoSweeper temp = SweeperPool.EnableObj();
+            temp.enabled = true;
+            temp.Init(transform.position, this);
+        }
     }
 
     public void PushSweeper(MonoSweeper sweeper)
