@@ -123,7 +123,7 @@ class CSCodeReviewer:
                 Logger.error(f"파일을 찾을 수 없음: {self.filepath}")
                 return False
 
-            original_code = self.filepath.read_text(encoding='utf-8')
+            original_code = self.filepath.read_text(encoding='utf-8-sig', errors='replace')
 
             # Stage 1: Planner
             Logger.info("\n" + "="*80)
@@ -372,28 +372,28 @@ Reviewer 피드백 파일: {reviewer_path}
 
             result = subprocess.run(
                 cmd_str,
-                input=user_prompt,  # stdin으로 전달
+                input=user_prompt.encode('utf-8'),
                 capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
                 timeout=timeout,
                 cwd=str(self.project_root),
                 env=env,
                 shell=True  # Windows PATH 검색 지원
             )
 
+            stdout = result.stdout.decode('utf-8', errors='replace')
+            stderr = result.stderr.decode('utf-8', errors='replace')
+
             # 에러 로깅
-            if result.stderr:
+            if stderr:
                 log_path = self.log_dir / f"{agent_name}_{self.timestamp}.log"
-                log_path.write_text(f"STDERR:\n{result.stderr}", encoding='utf-8')
+                log_path.write_text(f"STDERR:\n{stderr}", encoding='utf-8')
 
             if result.returncode != 0:
                 Logger.error(f"{agent_name} 실패 (returncode={result.returncode})")
-                Logger.error(f"stderr: {result.stderr[:200]}")
+                Logger.error(f"stderr: {stderr[:200]}")
                 return None
 
-            return result.stdout
+            return stdout
 
         except subprocess.TimeoutExpired:
             Logger.error(f"{agent_name} 타임아웃 ({timeout}초)")
@@ -610,11 +610,9 @@ Planner 계획이 3회 연속 거부된 주요 이유:
             result = subprocess.run(
                 ["git", "diff", "--", str(self.filepath)],
                 capture_output=True,
-                text=True,
-                encoding='utf-8',
                 cwd=str(self.project_root)
             )
-            return result.stdout if result.returncode == 0 else ""
+            return result.stdout.decode('utf-8', errors='replace') if result.returncode == 0 else ""
         except Exception as e:
             Logger.warning(f"git diff 수집 실패: {e}")
             return ""
