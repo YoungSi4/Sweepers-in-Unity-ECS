@@ -5,7 +5,7 @@ using Unity.Transforms;
 using Unity.Mathematics;
 
 // [UpdateInGroup(typeof(InitializationSystemGroup))]
-public partial struct SpawnerUpdateJob: ISystem
+public partial struct SpawnerSystem: ISystem
 {
     public void OnCreate(ref SystemState state)
         => state.RequireForUpdate<Spawner>();
@@ -29,11 +29,8 @@ public partial struct SpawnerUpdateJob: ISystem
                 ecb.SetComponent(instance, LocalTransform.FromPositionRotation(xform.ValueRO.Position, spawner.ValueRO.Sweeper_stand));
 
                 // set speed randomly
-                ecb.SetComponent(instance, Sweeper.Random(spawner.ValueRW.Rand.NextUInt(), spawner.ValueRO.Sweeper_speed));
+                ecb.SetComponent(instance, Sweeper.Random(spawner.ValueRW.Rand.NextUInt(), spawner.ValueRO.Sweeper_speed, spawner.ValueRO.Time_to_destroy));
             }
         }
-            
-        ecb.Playback(state.EntityManager);
-        ecb.Dispose();
     }
 }

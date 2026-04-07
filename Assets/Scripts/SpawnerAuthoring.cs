@@ -13,6 +13,7 @@ public struct Spawner : IComponentData
     public float Sweeper_speed;
     public quaternion Sweeper_stand;
     public Unity.Mathematics.Random Rand;
+    public float Time_to_destroy;
 
     //public Pool pool;
 
@@ -32,6 +33,7 @@ public class SpawnerAuthoring : MonoBehaviour
     public uint _randomSeed = 10;
 
     public float _sweeper_speed = 5f;
+    public float _time_to_destroy = 30f;
 
     class Baker : Baker<SpawnerAuthoring>
     {
@@ -45,7 +47,8 @@ public class SpawnerAuthoring : MonoBehaviour
                 timer = authoring._timer,
                 Sweeper_speed = authoring._sweeper_speed,
                 Sweeper_stand = quaternion.EulerXYZ(0, math.PI, 0),
-                Rand = new Unity.Mathematics.Random(authoring._randomSeed)
+                Rand = new Unity.Mathematics.Random(authoring._randomSeed),
+                Time_to_destroy = authoring._time_to_destroy
             };
             // spawner is invisible but I choose renderable
             AddComponent(GetEntity(TransformUsageFlags.Dynamic), data);

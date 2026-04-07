@@ -7,23 +7,37 @@ using Unity.Transforms;
 partial struct SweeperUpdateJob : IJobEntity
 {
     public float Deltatime;
+    public EntityCommandBuffer.ParallelWriter Ecb;
 
-    void Execute(in Sweeper sweeper, ref LocalTransform xform)
+    void Execute([ChunkIndexInQuery] int sortKey, Entity entity, ref Sweeper sweeper, ref LocalTransform xform)
     {
-        // Time.deltaTime : called from MonoBehaviour.FixedUpdate or WaitForFixedUpdate
-        var dX = sweeper.Speed * Deltatime;
-        xform.Position.x += dX;
+        sweeper.Timer += Deltatime;
+        if (sweeper.Timer > sweeper.TimeToDestroy)
+        {
+            Ecb.DestroyEntity(sortKey, entity);
+            return;
+        }
+
+        // UnityEngine.Time.deltaTime : called from MonoBehaviour.FixedUpdate or WaitForFixedUpdate
+        xform.Position.x += sweeper.Speed * Deltatime;
     }
 }
 
 public partial struct SweeperSystem : ISystem
 {
+    // private EntityQuery _query;
+    // ÇÊ¿ä ½Ã OnCreate¿¡¼­ Äõ¸® Ä³½Ì
+
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        var ecbSystem = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>();
+        var ecb = ecbSystem.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+
         var job = new SweeperUpdateJob()
         {
-            Deltatime = (float)SystemAPI.Time.DeltaTime
+            Deltatime = (float)SystemAPI.Time.DeltaTime,
+            Ecb = ecb
         };
         job.ScheduleParallel();
     }
