@@ -1,4 +1,4 @@
-using Unity.Burst;
+ï»¿using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
 // using UnityEngine;
@@ -26,7 +26,6 @@ partial struct SweeperUpdateJob : IJobEntity
 public partial struct SweeperSystem : ISystem
 {
     // private EntityQuery _query;
-    // ÇÊ¿ä ½Ã OnCreate¿¡¼­ Äõ¸® Ä³½Ì
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
