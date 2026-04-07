@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 3400791452493057796}
+  - component: {fileID: -6791390388708318147}
   m_Layer: 0
   m_Name: Spawner_Mono
   m_TagString: Untagged
@@ -31,3 +32,21 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &-6791390388708318147
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2330845199584278580}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 408f48ea3b4b8234caa887b041c05a42, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MonoSpawner
+  Spawn_delay: 0.2
+  timer: 0
+  Spawn_count: 2
+  prefab: {fileID: 8326853841011439367, guid: 46f62ebacfe4c2344b30027a11168163, type: 3}
+  Time_to_destroy: 30
+  initPoolSize: 100
