@@ -27,5 +27,4 @@
 전용 GPU 메모리	6.0GB / 공유 GPU 메모리	7.9GB / GPU 메모리 13.9GB
 
 ### 구현 결과
-이후 추가 - 영상 및 프로파일 레포트  
-이 리포트도 ai로 작성할 예정
+[![Sample Video](http://img.https://youtu.be/lWLtYZOJ0q8?si=u4scVu4-d8g0mPOq.jpg)](https://youtu.be/lWLtYZOJ0q8?si=u4scVu4-d8g0mPOq)
