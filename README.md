@@ -30,5 +30,5 @@
   GPU 메모리 13.9GB
 
 ## 외부 링크
-[블로그 개발 일지 - Unity ECS](https://blog.naver.com/dksdudgns666/224241944442)
+[블로그 개발 일지 - Unity ECS](https://blog.naver.com/dksdudgns666/224241944442)  
 [블로그 개발 일지 - 코드 리뷰 & 리팩터링 자동화 툴](https://blog.naver.com/dksdudgns666/224235003495)
