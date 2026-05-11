@@ -1,22 +1,24 @@
-## Sweepers in Unity ECS  
+# Sweepers in Unity ECS  
+**클릭하여 프로젝트 영상 보러가기!**
+[![프로젝트 영상 보러가기](https://img.youtube.com/vi/lWLtYZOJ0q8/maxresdefault.jpg)](https://youtu.be/lWLtYZOJ0q8)
 
-### 프로젝트 개요
+## 프로젝트 개요
 - **1. AI CLI 툴 활용**
 - **2. Unity ECS 컴포넌트 활용 최적화 시도**
 
-### 상세
+## 상세
 **1. AI CLI 활용 : CLI 를 이용하여 여러 툴을 만듭니다**
-- claude code를 적극적으로 이용하여 생산성 향상을 도모합니다
+- 본 프로젝트는 claude code를 적극적으로 이용하여 생산성 향상을 도모합니다
 - subprocess API를 작성하고 오케스트레이션을 이용합니다
-- 툴을 만드는 툴을 제작합니다
 - 해당 프로젝트의 코드를 리뷰하고 자동 리팩터링 하는 툴을 만듭니다 (리팩터링 과정은 user permission 필요)
 
 **2. Unity ECS 컴포넌트 활용 최적화 시도**
 - 씬 1: mono 구현
 - 씬 2: ECS 구현
-- 같은 오브젝트의 물량이 쏟아져 나오는 장면을 최적화로 구현하고 어느 정도 규모까지 60fps 방어가 가능한지 확인합니다
+- 같은 오브젝트의 물량이 쏟아져 나오는 장면을 최적화로 구현하고 어느 정도 규모까지 60fps 방어가 가능한지 확인합니다.
+  방어가 안 되었더라도 어느 정도 근사치까지 도달할 수 있는지가 중요합니다.
 
-### 환경 및 사양
+## 환경 및 사양
 - Unity 3D Mono / ECS
 - 기종 : Msi GP75 Leopard 9SD
 - 프로세서 : 인텔 i7 - 9750H CPU 2.60GHZ
@@ -24,8 +26,9 @@
 - 램 : 16.0 GB
 - 그래픽 카드 0 : Intel(R) UHD Graphics 630
 - 그래픽 카드 1 : NVIDIA GeForce GTX 1660 Ti  
-전용 GPU 메모리	6.0GB / 공유 GPU 메모리	7.9GB / GPU 메모리 13.9GB
+  전용 GPU 메모리	6.0GB / 공유 GPU 메모리	7.9GB
+  GPU 메모리 13.9GB
 
-### 구현 결과
-클릭하면 동영상으로 이동합니다
-[![프로젝트 영상 보러가기](https://img.youtube.com/vi/lWLtYZOJ0q8/maxresdefault.jpg)](https://youtu.be/lWLtYZOJ0q8)
+## 외부 링크
+[블로그 개발 일지 - Unity ECS](https://blog.naver.com/dksdudgns666/224241944442)
+[블로그 개발 일지 - 코드 리뷰 & 리팩터링 자동화 툴](https://blog.naver.com/dksdudgns666/224235003495)
